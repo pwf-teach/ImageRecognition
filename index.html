@@ -1,707 +1,1511 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<!doctype html>
+<html lang="zh-Hant-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>剪刀石頭布影像辨識：揭開模型訓練的黑箱</title>
-    <!-- 引入 Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 Prism.js 用於程式碼高亮 -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
-    
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
-        
-        body {
-            font-family: 'Inter', 'Noto Sans TC', sans-serif;
-            font-size: 20px;
-            overflow: hidden;
-        }
-        
-        .page {
-            display: none;
-            opacity: 0;
-            transition: opacity 0.3s ease-in-out;
-        }
-        
-        .page.active {
-            display: flex;
-            opacity: 1;
-        }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>揭開模型訓練的黑箱</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout：方格紙實驗筆記本。上方分組進度條、中間一頁一頁的講解、下方固定導覽列 */
+:root{
+  --paper:#f6f8fb;      /* 頁面底色：帶一點藍的方格紙 */
+  --sheet:#ffffff;      /* 卡片／互動區 */
+  --ink:#16202e;        /* 主要文字 */
+  --muted:#5b6a7d;      /* 次要文字 */
+  --line:#d5dde8;       /* 格線、框線 */
+  --grid:#e7edf5;       /* 背景方格 */
+  --accent:#d9480f;     /* 卷積核橘：重點、互動焦點 */
+  --accent-soft:#ffe8dc;
+  --teal:#0b7a75;       /* 像素綠藍：正確、資料 */
+  --teal-soft:#d9f2ef;
+  --bad:#c92a2a; --bad-soft:#ffe3e3;
+  --code-bg:#f0f3f8;
+  --g0:#5b6a7d; --g1:#0b7a75; --g2:#6741d9; --g3:#d9480f; --g4:#2b8a3e;
+  --font-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  --fs-base:20px; --fs-small:17px; --fs-h1:40px; --fs-h2:28px; --fs-h3:22px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --paper:#0f141b; --sheet:#171e28; --ink:#e8eef6; --muted:#9aa9bb; --line:#2c3746; --grid:#151c25;
+  --accent:#ff8a4c; --accent-soft:#3a2216; --teal:#3cc7bf; --teal-soft:#0f302e;
+  --bad:#ff6b6b; --bad-soft:#3a1717; --code-bg:#1d2633;
+  --g0:#9aa9bb; --g1:#3cc7bf; --g2:#9775fa; --g3:#ff8a4c; --g4:#69db7c; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --paper:#0f141b; --sheet:#171e28; --ink:#e8eef6; --muted:#9aa9bb; --line:#2c3746; --grid:#151c25;
+  --accent:#ff8a4c; --accent-soft:#3a2216; --teal:#3cc7bf; --teal-soft:#0f302e;
+  --bad:#ff6b6b; --bad-soft:#3a1717; --code-bg:#1d2633;
+  --g0:#9aa9bb; --g1:#3cc7bf; --g2:#9775fa; --g3:#ff8a4c; --g4:#69db7c; color-scheme:dark; }
 
-        ::-webkit-scrollbar { width: 10px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 5px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:var(--fs-base);line-height:1.65;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:28px 28px}
+[hidden]{display:none!important}
+h1,h2,h3{text-wrap:balance;line-height:1.3;margin:0}
+p{margin:0}
+code,.mono{font-family:var(--font-mono);font-size:.9em}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 
-        /* 讓小圓點的群組之間有微小間隔 */
-        .group-separator {
-            width: 2px;
-            height: 16px;
-            background-color: #e2e8f0;
-            margin: 0 4px;
-            border-radius: 2px;
-        }
-    </style>
+/* ── 上方：進度條 ── */
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:color-mix(in srgb,var(--paper) 92%,transparent);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.topbar-inner{max-width:1280px;margin:0 auto;padding:10px 16px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.brand{font-weight:900;font-size:17px;letter-spacing:.02em;white-space:nowrap}
+.progress{display:flex;gap:14px;flex-wrap:wrap;flex:1;min-width:0}
+.pgroup{display:flex;align-items:center;gap:6px}
+.pgroup-label{font-size:13px;color:var(--muted);letter-spacing:.06em}
+.dot{width:16px;height:16px;border-radius:4px;border:2px solid var(--gc);background:transparent;cursor:pointer;padding:0;position:relative}
+.dot.done{background:color-mix(in srgb,var(--gc) 35%,transparent)}
+.dot.current{background:var(--gc);transform:scale(1.2)}
+.dot:hover::after{content:attr(data-title);position:absolute;top:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:14px;padding:4px 8px;border-radius:6px;white-space:nowrap;z-index:20}
+
+/* ── 頁面 ── */
+main{max-width:1280px;margin:0 auto;padding-block:24px 120px;padding-inline:16px}
+.page{display:none}
+.page.active{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:.4;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.page.active{animation:none}*{transition:none!important}}
+.phead{display:flex;flex-direction:column;gap:8px;margin-bottom:22px}
+.tags{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.numtag{font-family:var(--font-mono);font-weight:600;font-size:22px;background:var(--gc);color:var(--sheet);padding:2px 12px;border-radius:6px}
+.numnote{font-size:14px;color:var(--muted)}
+.chip{font-size:15px;font-weight:700;padding:2px 10px;border-radius:999px;border:2px solid currentColor}
+.chip.todo{color:var(--accent)} .chip.bonus{color:var(--g2)}
+.phead h2{font-size:var(--fs-h1);font-weight:900}
+.phead .goal{color:var(--muted);font-size:var(--fs-base);max-width:60ch}
+
+.card{background:var(--sheet);border:1px solid var(--line);border-radius:10px;padding:22px}
+.stack{display:flex;flex-direction:column;gap:20px}
+.row{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
+.row>*{min-width:0}
+.grow{flex:1 1 320px}
+.card h3{font-size:var(--fs-h3);font-weight:700;margin-bottom:10px}
+.small{font-size:var(--fs-small);color:var(--muted)}
+.btn{background:var(--sheet);border:2px solid var(--ink);border-radius:8px;padding:6px 16px;cursor:pointer;font-weight:700}
+.btn:hover{background:var(--accent-soft)}
+.btn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--sheet)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.ok{color:var(--teal);font-weight:700} .err{color:var(--bad);font-weight:700}
+.note{border-left:5px solid var(--accent);background:var(--accent-soft);padding:12px 16px;border-radius:6px}
+.note.teal{border-color:var(--teal);background:var(--teal-soft)}
+.scroll-x{overflow-x:auto;max-width:100%}
+
+/* 頁內分頁 */
+.tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid var(--line);margin-bottom:18px}
+.tab{background:none;border:none;border-bottom:4px solid transparent;padding:8px 14px;cursor:pointer;font-weight:700;color:var(--muted);margin-bottom:-2px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+
+/* 程式碼 */
+pre.code{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:0;font-family:var(--font-mono);font-size:17px;line-height:1.6;overflow-x:auto;white-space:pre}
+.tk-k{color:var(--g2);font-weight:600} .tk-s{color:var(--teal)} .tk-c{color:var(--muted);font-style:italic} .tk-n{color:var(--accent)} .tk-f{color:var(--g4)}
+
+/* 頁尾：答案、想一想 */
+details.reveal{margin-top:26px;background:var(--sheet);border:2px dashed var(--line);border-radius:10px;padding:14px 18px}
+details.reveal>summary{cursor:pointer;font-weight:700;font-size:var(--fs-h3);list-style:none}
+details.reveal>summary::before{content:"▸ ";color:var(--accent)}
+details.reveal[open]>summary::before{content:"▾ "}
+details.reveal[open]{border-style:solid;border-color:var(--accent)}
+details.reveal .inner{margin-top:12px;display:flex;flex-direction:column;gap:10px}
+
+/* 數字格 */
+.grid{display:grid;gap:2px;width:max-content}
+.cell{width:var(--cs,40px);height:var(--cs,40px);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:var(--cf,15px);border-radius:3px;user-select:none;position:relative;font-variant-numeric:tabular-nums}
+.cell.sel{outline:3px solid var(--accent);outline-offset:-3px;z-index:1}
+
+/* ── 下方導覽列 ── */
+.navbar{position:fixed;left:0;right:0;bottom:0;z-index:10;background:var(--sheet);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.navbar-inner{max-width:1280px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.navbar .btn{font-size:20px;padding:8px 22px}
+.counter{font-family:var(--font-mono);font-size:18px;color:var(--muted);text-align:center}
+.counter b{color:var(--ink)}
+
+/* 封面 */
+.cover-title{font-size:clamp(34px,5vw,60px);font-weight:900;line-height:1.15;max-width:18ch}
+.cover-sub{font-size:22px;color:var(--muted);margin-top:10px}
+.map{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:34px}
+.map-col{border-top:5px solid var(--gc);background:var(--sheet);border-radius:0 0 10px 10px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.map-col h3{font-size:18px;color:var(--gc);letter-spacing:.08em}
+.map-item{text-align:left;background:none;border:none;padding:6px 6px;border-radius:6px;cursor:pointer;display:flex;gap:8px;align-items:baseline;font-size:17px}
+.map-item:hover{background:var(--accent-soft)}
+.map-item .mono{color:var(--gc);font-weight:600;white-space:nowrap;font-size:14px}
+
+.colab{margin-top:28px;border:2px solid var(--ink);border-radius:12px;overflow:hidden;background:var(--sheet)}
+.colab-head{background:var(--ink);color:var(--sheet);padding:10px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-weight:700;font-size:var(--fs-h3)}
+.colab-head .where{font-family:var(--font-mono);background:var(--accent);color:#fff;padding:2px 10px;border-radius:6px;font-size:18px}
+.colab-body{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+.colab ol{margin:0;padding-left:1.6em;display:flex;flex-direction:column;gap:6px}
+.colab .blank{background:var(--accent-soft);color:var(--accent);font-weight:700;border-radius:3px;padding:0 2px}
+.tocolab{display:inline-flex;gap:8px;align-items:center;align-self:flex-start;border:2px solid var(--accent);color:var(--accent);background:var(--sheet);border-radius:999px;padding:4px 14px;font-weight:700;cursor:pointer}
+.tocolab:hover{background:var(--accent-soft)}
+/* placeholder */
+.wip{display:flex;align-items:center;justify-content:center;min-height:260px;color:var(--muted);font-size:24px;border:2px dashed var(--line);border-radius:12px}
+
+@media (max-width:640px){
+  :root{--fs-base:17px;--fs-small:15px;--fs-h1:28px;--fs-h2:22px;--fs-h3:19px}
+  .brand{display:none}
+}
+</style>
 </head>
-<body class="bg-slate-50 text-slate-800 h-screen w-screen flex flex-col selection:bg-blue-200">
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <div class="brand">剪刀石頭布影像辨識</div>
+  <nav class="progress" id="progress" aria-label="課程進度"></nav>
+</div></header>
 
-    <header class="bg-white shadow-sm flex flex-col z-20 shrink-0">
-        <div id="top-nav-dots" class="px-6 py-4 flex items-center justify-center gap-3 overflow-x-auto">
-            <!-- 圓點將由 JS 動態生成 -->
-        </div>
-        <!-- 進度條 -->
-        <div class="h-1.5 w-full bg-slate-200 flex">
-            <div id="progress-bar" class="h-full bg-slate-500 transition-all duration-500 w-0"></div>
-        </div>
-    </header>
+<main id="main"></main>
 
-    <main class="flex-1 overflow-y-auto relative p-6 md:p-8 flex justify-center">
-        
-        <!-- ================= 第 0 頁：封面與課程地圖 ================= -->
-        <section id="page-0" class="page w-full max-w-5xl flex-col items-center justify-start text-center py-6">
-            <h2 class="text-xl md:text-2xl font-bold text-slate-500 mb-2 tracking-wider">高二資訊專題</h2>
-            <h1 class="text-4xl md:text-5xl font-black text-slate-800 mb-8 leading-tight">
-                剪刀石頭布影像辨識<br>
-                <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">揭開模型訓練的黑箱</span>
-            </h1>
+<footer class="navbar"><div class="navbar-inner">
+  <button class="btn" id="prevBtn" type="button">◀ 上一步</button>
+  <div class="counter" id="counter"></div>
+  <button class="btn primary" id="nextBtn" type="button">下一步 ▶</button>
+</div></footer>
 
-            <div class="w-full bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 text-left">
-                <h3 class="text-2xl font-bold text-slate-700 mb-6 border-b-2 border-slate-100 pb-2 flex items-center gap-2">
-                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
-                    課程地圖
-                </h3>
-                
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- Group 1: 準備 -->
-                    <div class="flex flex-col gap-3">
-                        <h4 class="text-lg font-bold text-slate-500 flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-slate-500"></span>準備</h4>
-                        <button onclick="goToPage(1)" class="text-left p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">0</span>
-                            <span class="font-medium text-[17px]">第 0 節｜開始之前</span>
-                        </button>
-                    </div>
+<script>
+/* ═════════ 共用工具 ═════════ */
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") el.className = v;
+    else if (k === "html") el.innerHTML = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "style") el.style.cssText = v;
+    else el.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
+};
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-                    <!-- Group 2: 資料 -->
-                    <div class="flex flex-col gap-3 lg:row-span-2">
-                        <h4 class="text-lg font-bold text-blue-500 flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-blue-500"></span>資料</h4>
-                        <button onclick="goToPage(2)" class="text-left p-3 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-100 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-blue-200 text-blue-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">2</span>
-                            <span class="font-medium text-[17px]">2-1～2-2｜拍照蒐集資料</span>
-                        </button>
-                        <button onclick="goToPage(3)" class="text-left p-3 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-100 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-blue-200 text-blue-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">2</span>
-                            <span class="font-medium text-[17px]">2-3～2-6｜照片存在哪裡？</span>
-                        </button>
-                        <button onclick="goToPage(4)" class="text-left p-3 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors flex items-center group shadow-sm shadow-blue-100">
-                            <span class="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">T1</span>
-                            <span class="font-bold text-blue-800 text-[17px]">3-1｜TODO 1：影像就是數字</span>
-                        </button>
-                        <button onclick="goToPage(5)" class="text-left p-3 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-amber-200 text-amber-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">★</span>
-                            <span class="font-medium text-amber-800 text-[17px]">3-2｜★ 延伸挑戰：手算卷積</span>
-                        </button>
-                        <button onclick="goToPage(6)" class="text-left p-3 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors flex items-center group shadow-sm shadow-blue-100">
-                            <span class="w-8 h-8 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">T2</span>
-                            <span class="font-bold text-blue-800 text-[17px]">4-1｜TODO 2：資料擴增</span>
-                        </button>
-                        <button onclick="goToPage(7)" class="text-left p-3 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-100 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-blue-200 text-blue-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">4</span>
-                            <span class="font-medium text-[17px]">4-1｜三組資料：訓練、驗證、挑戰</span>
-                        </button>
-                    </div>
+/* 極簡語法高亮（Python / C++） */
+function highlight(code, lang = "py") {
+  const kw = lang === "cpp"
+    ? /\b(for|int|float|unsigned|char|return|if|else|auto|void|double)\b/
+    : /\b(for|in|range|def|return|if|else|elif|import|from|as|with|not|and|or|None|True|False|print|while)\b/;
+  const re = /(#[^\n]*|\/\/[^\n]*)|("[^"\n]*"|'[^'\n]*')|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)(?=\()|([A-Za-z_]\w*)/g;
+  let out = "", last = 0, m;
+  while ((m = re.exec(code))) {
+    out += esc(code.slice(last, m.index));
+    const t = esc(m[0]);
+    if (m[1]) out += `<span class="tk-c">${t}</span>`;
+    else if (m[2]) out += `<span class="tk-s">${t}</span>`;
+    else if (m[3]) out += `<span class="tk-n">${t}</span>`;
+    else if (m[4]) out += kw.test(m[4]) ? `<span class="tk-k">${t}</span>` : `<span class="tk-f">${t}</span>`;
+    else out += kw.test(m[5]) && m[5].match(kw)[0] === m[5] ? `<span class="tk-k">${t}</span>` : t;
+    last = re.lastIndex;
+  }
+  return out + esc(code.slice(last));
+}
+const codeBlock = (code, lang = "py") => h("pre", { class: "code", html: highlight(code, lang) });
 
-                    <!-- Group 3: 模型 -->
-                    <div class="flex flex-col gap-3">
-                        <h4 class="text-lg font-bold text-indigo-500 flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-indigo-500"></span>模型</h4>
-                        <button onclick="goToPage(8)" class="text-left p-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors flex items-center group shadow-sm shadow-indigo-100">
-                            <span class="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">T3</span>
-                            <span class="font-bold text-indigo-800 text-[17px]">5-1｜TODO 3：凍結、微調、從零</span>
-                        </button>
-                        <button onclick="goToPage(9)" class="text-left p-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors flex items-center group shadow-sm shadow-indigo-100">
-                            <span class="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">T4</span>
-                            <span class="font-bold text-indigo-800 text-[17px]">5-2～5-3｜TODO 4：換掉最後一層</span>
-                        </button>
-                    </div>
-                    
-                    <!-- Group 4: 訓練與結果 -->
-                    <div class="flex flex-col gap-3 lg:col-start-1">
-                        <h4 class="text-lg font-bold text-emerald-500 flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-emerald-500"></span>訓練與結果</h4>
-                        <button onclick="goToPage(10)" class="text-left p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors flex items-center group shadow-sm shadow-emerald-100">
-                            <span class="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">T5</span>
-                            <span class="font-bold text-emerald-800 text-[17px]">6-1～6-2｜TODO 5：訓練的五個步驟</span>
-                        </button>
-                        <button onclick="goToPage(11)" class="text-left p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors flex items-center group shadow-sm shadow-emerald-100">
-                            <span class="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">T6</span>
-                            <span class="font-bold text-emerald-800 text-[17px]">6-3｜TODO 6：計算猜對幾張</span>
-                        </button>
-                        <button onclick="goToPage(12)" class="text-left p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-emerald-200 text-emerald-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">6</span>
-                            <span class="font-medium text-[17px]">6-5～6-6｜看懂訓練結果</span>
-                        </button>
-                        <button onclick="goToPage(13)" class="text-left p-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-emerald-200 text-emerald-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">6</span>
-                            <span class="font-medium text-[17px]">6-7｜⏱ 計時賽</span>
-                        </button>
-                        <button onclick="goToPage(14)" class="text-left p-3 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-amber-200 text-amber-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">★</span>
-                            <span class="font-medium text-amber-800 text-[17px]">6-8｜★ 延伸挑戰：記錄 loss 曲線</span>
-                        </button>
-                    </div>
+/* 每頁的計時器：離開頁面時統一清掉 */
+const Timers = {
+  list: [],
+  timeout(fn, ms) { const id = setTimeout(fn, ms); this.list.push(["t", id]); return id; },
+  interval(fn, ms) { const id = setInterval(fn, ms); this.list.push(["i", id]); return id; },
+  clear() { for (const [k, id] of this.list) k === "t" ? clearTimeout(id) : clearInterval(id); this.list = []; }
+};
 
-                    <!-- Group 5: 實驗與應用 -->
-                    <div class="flex flex-col gap-3 lg:col-start-3 lg:row-start-2">
-                        <h4 class="text-lg font-bold text-rose-500 flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-rose-500"></span>實驗與應用</h4>
-                        <button onclick="goToPage(15)" class="text-left p-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-100 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-rose-200 text-rose-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">7</span>
-                            <span class="font-medium text-[17px]">第 7 節｜我的實驗：只改一個變因</span>
-                        </button>
-                        <button onclick="goToPage(16)" class="text-left p-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors flex items-center group shadow-sm shadow-rose-100">
-                            <span class="w-8 h-8 rounded-full bg-rose-600 text-white font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">T7</span>
-                            <span class="font-bold text-rose-800 text-[17px]">8-1｜TODO 7：把分數變成機率</span>
-                        </button>
-                        <button onclick="goToPage(17)" class="text-left p-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-100 transition-colors flex items-center group">
-                            <span class="w-8 h-8 rounded-full bg-rose-200 text-rose-700 font-bold flex items-center justify-center mr-3 text-sm group-hover:scale-110 transition-transform">9</span>
-                            <span class="font-medium text-[17px]">第 9 節｜回到你的題目</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </section>
+/* 頁內分頁 */
+function makeTabs(defs) {
+  const bar = h("div", { class: "tabs", role: "tablist" });
+  const panes = [];
+  defs.forEach((d, i) => {
+    const b = h("button", { class: "tab", role: "tab", type: "button", "aria-selected": i === 0 ? "true" : "false" }, d.label);
+    const pane = h("div", { role: "tabpanel" }, d.content);
+    if (i) pane.hidden = true;
+    b.addEventListener("click", () => {
+      $$(".tab", bar).forEach(x => x.setAttribute("aria-selected", "false"));
+      b.setAttribute("aria-selected", "true");
+      panes.forEach(p => (p.hidden = true));
+      pane.hidden = false;
+      d.onShow && d.onShow();
+    });
+    bar.append(b); panes.push(pane);
+  });
+  return h("div", {}, bar, ...panes);
+}
+const answer = (...kids) => h("details", { class: "reveal" }, h("summary", {}, "顯示答案"), h("div", { class: "inner" }, ...kids));
+const think = (q, ...kids) => h("details", { class: "reveal" }, h("summary", {}, "🤔 想一想：" + q), h("div", { class: "inner" }, ...kids));
 
-        <!-- ================= 第 1 頁：第 0 節 ================= -->
-        <section id="page-1" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-slate-700 mb-3 flex items-baseline gap-2">第 0 節｜開始之前<span class="text-base font-normal text-slate-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-slate-100 p-4 rounded-xl border-l-4 border-slate-400 shadow-sm">
-                    <strong>目標：</strong>準備好 Colab 環境，連結雲端硬碟，並載入必要的套件。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleHint(1)" id="btn-hint-1" class="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300 transition-colors shadow-sm">想一想</button>
-                <div id="hint-box-1" class="hidden mt-4 bg-slate-50 border border-slate-200 p-6 rounded-xl shadow-sm text-lg text-slate-700">
-                    <p><strong>想一想：</strong>我們為什麼要在 Colab 上寫 Python？它和在自己電腦上寫有什麼不一樣？</p>
-                    <p class="mt-2 text-slate-500 text-base">(提示區塊製作中...)</p>
-                </div>
-            </footer>
-        </section>
+/* 簡化手勢圖（SVG） */
+function handSVG(kind, o = {}) {
+  const { size = 90, bg = "#dbe4ee", dx = 0, dy = 0, rot = 0, scale = 1, flip = false, dark = 0, skin = "#e7b694", shade = "#c98f6d" } = o;
+  const sx = flip ? -scale : scale;
+  let g = `<rect x="41" y="74" width="18" height="30" rx="4" fill="${skin}"/>`;
+  if (kind === "rock") {
+    g += `<rect x="28" y="40" width="44" height="38" rx="13" fill="${skin}"/>
+      ${[34, 44, 54, 64].map(x => `<circle cx="${x}" cy="42" r="6.5" fill="${skin}" stroke="${shade}" stroke-width="2"/>`).join("")}
+      <rect x="27" y="56" width="30" height="10" rx="5" fill="${skin}" stroke="${shade}" stroke-width="2"/>`;
+  } else if (kind === "paper") {
+    g += `<rect x="31" y="46" width="38" height="34" rx="10" fill="${skin}"/>`;
+    [[32, 20], [41, 14], [50, 13], [59, 18]].forEach(([x, y]) => (g += `<rect x="${x}" y="${y}" width="8" height="${50 - y}" rx="4" fill="${skin}"/>`));
+    g += `<rect x="64" y="44" width="8" height="24" rx="4" fill="${skin}" transform="rotate(35 68 56)"/>`;
+  } else {
+    g += `<rect x="30" y="50" width="40" height="30" rx="12" fill="${skin}"/>
+      <rect x="37" y="14" width="9" height="42" rx="4.5" fill="${skin}" transform="rotate(-14 41 52)"/>
+      <rect x="51" y="14" width="9" height="42" rx="4.5" fill="${skin}" transform="rotate(14 55 52)"/>
+      <path d="M34 66 H66" stroke="${shade}" stroke-width="2.5"/>`;
+  }
+  return `<svg viewBox="0 0 100 100" width="${size}" height="${size}" role="img" aria-label="${{ rock: "石頭", paper: "布", scissors: "剪刀" }[kind]}">
+    <rect width="100" height="100" fill="${bg}"/>
+    <g transform="translate(${50 + dx} ${50 + dy}) rotate(${rot}) scale(${sx} ${scale}) translate(-50 -50)">${g}</g>
+    ${dark ? `<rect width="100" height="100" fill="#000" opacity="${dark}"/>` : ""}</svg>`;
+}
+const rand = (a, b) => a + Math.random() * (b - a);
 
-        <!-- ================= 第 2 頁：第 2 節 ================= -->
-        <section id="page-2" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-blue-700 mb-3 flex items-baseline gap-2">2-1～2-2｜拍照蒐集資料<span class="text-base font-normal text-blue-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-blue-50 p-4 rounded-xl border-l-4 border-blue-500 shadow-sm">
-                    <strong>目標：</strong>使用程式碼直接在 Colab 透過視訊鏡頭捕捉訓練影像。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleHint(2)" id="btn-hint-2" class="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300 transition-colors shadow-sm">想一想</button>
-                <div id="hint-box-2" class="hidden mt-4 bg-slate-50 border border-slate-200 p-6 rounded-xl shadow-sm text-lg text-slate-700">
-                    <p><strong>想一想：</strong>如果訓練用的照片背景太單一，會發生什麼事？</p>
-                </div>
-            </footer>
-        </section>
+/* ═════════ 頁面清單 ═════════ */
+const GROUPS = [
+  { name: "準備", color: "var(--g0)" }, { name: "資料", color: "var(--g1)" }, { name: "模型", color: "var(--g2)" },
+  { name: "訓練與結果", color: "var(--g3)" }, { name: "實驗與應用", color: "var(--g4)" }
+];
+const PAGES = [
+  { num: "", title: "封面", g: 0 },
+  { num: "第 0 節", title: "開始之前", g: 0, goal: "認識 Colab，完成上課前的準備。" },
+  { num: "2-1～2-2", title: "拍照蒐集資料", g: 1, goal: "知道為什麼要拍兩組照片，以及各要怎麼拍。" },
+  { num: "2-3～2-6", title: "照片存在哪裡？", g: 1, goal: "看懂資料夾結構與路徑，知道怎麼刪掉重拍。" },
+  { num: "3-1", title: "影像就是數字", g: 1, todo: "TODO 1", goal: "一張彩色照片就是一個三維陣列；學會用切片取出一塊。", answer: "corner = arr[:4, :4, 0]" },
+  { num: "3-2", title: "卷積是什麼？", g: 1, bonus: "★ 延伸挑戰 A 在本頁最後", goal: "看懂卷積核怎麼一格一格算出特徵圖。這是理解卷積神經網路的基礎，全班都要看。" },
+  { num: "4-1", title: "資料擴增", g: 1, todo: "TODO 2" },
+  { num: "4-1", title: "三組資料：訓練、驗證、挑戰", g: 1 },
+  { num: "5-1", title: "凍結、微調、從零", g: 2, todo: "TODO 3" },
+  { num: "5-2～5-3", title: "換掉最後一層", g: 2, todo: "TODO 4" },
+  { num: "6-1～6-2", title: "訓練的五個步驟", g: 3, todo: "TODO 5" },
+  { num: "6-3", title: "計算猜對幾張", g: 3, todo: "TODO 6" },
+  { num: "6-5～6-6", title: "看懂訓練結果", g: 3 },
+  { num: "6-7", title: "⏱ 計時賽", g: 3 },
+  { num: "6-8", title: "記錄 loss 曲線", g: 3, bonus: "★ 延伸挑戰 C｜加分題，與 A 任選一題" },
+  { num: "第 7 節", title: "我的實驗：只改一個變因", g: 4 },
+  { num: "8-1", title: "把分數變成機率", g: 4, todo: "TODO 7" },
+  { num: "第 9 節", title: "回到你的題目", g: 4 }
+];
+const BUILDERS = {};   // BUILDERS[i] = { build(section), enter(), leave() }
 
-        <!-- ================= 第 3 頁：第 2 節 (照片) ================= -->
-        <section id="page-3" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-blue-700 mb-3 flex items-baseline gap-2">2-3～2-6｜照片存在哪裡？<span class="text-base font-normal text-blue-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-blue-50 p-4 rounded-xl border-l-4 border-blue-500 shadow-sm">
-                    <strong>目標：</strong>了解照片在雲端硬碟的資料夾結構，以及如何被程式讀取。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleHint(3)" id="btn-hint-3" class="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300 transition-colors shadow-sm">想一想</button>
-                <div id="hint-box-3" class="hidden mt-4 bg-slate-50 border border-slate-200 p-6 rounded-xl shadow-sm text-lg text-slate-700">
-                    <p><strong>想一想：</strong>資料夾的名稱就是答案（標籤）嗎？</p>
-                </div>
-            </footer>
-        </section>
+/* ═════════ 每頁「回到 Colab」要做什麼 ═════════ */
+const COLAB = {
+  1: { where: "第 0 節、第 1 節", steps: ["打開老師給的 Colab 學生版", "完成「第 0 節｜開始前請先做」的 4 個步驟（儲存副本、改檔名、選 T4 GPU）", "執行「第 1 節｜環境設定」那一格"] },
+  2: { where: "2-1、2-2", steps: ["執行「2-1｜拍訓練照片」：每種手勢連拍 30 張", "執行「2-2｜拍挑戰照片」：刻意換條件，每種手勢 10 張"] },
+  3: { where: "2-3～2-6", steps: ["執行 2-3、2-4，確認張數和照片內容", "有手勢拍壞了，才用「2-5」刪除重拍", "下課前執行「2-6」第一格備份照片"] },
+  4: { where: "3-1｜✏️ TODO 1", todo: true, steps: ["找到「3-1｜✏️ TODO 1」下面那一格", "把 ____ 換成你的答案", "執行這一格，再執行下一格「✔ 自我檢查 TODO 1」，看到 ✅ 就完成了"],
+       code: `# ✏️ TODO 1：用切片取出「左上角 4×4」的「紅色(R)通道」\ncorner = ____\nprint(corner)` },
+  5: { where: "3-2｜★★ 挑戰 A（選做）", steps: ["全班：這一頁是觀念，不用寫程式，看完直接往下", "選挑戰 A 的同學：到「3-2｜★★ 挑戰 A」完成 my_conv2d，執行後看到 ✅ 就完成了"],
+       code: `def my_conv2d(img2d, kernel):\n    H, W = img2d.shape\n    k = kernel.shape[0]\n    out = np.zeros((H - k + 1, W - k + 1))\n    # ★★ 挑戰 A：用 for 迴圈把 out 填滿\n    return out` },
+  6: { where: "4-1｜✏️ TODO 2", todo: true, steps: ["找到「4-1」下面那一格的第一行", "把 ____ 換成你選的擴增（list，名稱要加引號）", "執行這一格，再執行「✔ 自我檢查 TODO 2」"],
+       code: `MY_AUGS = ____      # TODO 2` },
+  7: { where: "4-1", steps: ["執行完 TODO 2 那一格後，下方會印出「訓練集／同場景驗證集／換情境挑戰集」各有幾張"] },
+  8: { where: "5-2 下方那一格（TODO 3、4 在同一格）", todo: true, steps: ["找到 build_model 函式", "TODO 3-1：在 ... 的位置寫 for 迴圈（可以多行）", "TODO 3-2：把 pretrained=____ 填好", "TODO 4 也在同一格，填完一起執行，再執行「✔ 自我檢查 TODO 3、4」"],
+       code: `def build_model(mode, backbone="resnet18"):\n    if mode == "freeze":\n        model = load_backbone(backbone, pretrained=True)\n        # TODO 3-1：用 for 迴圈把 model 的所有參數設為不更新\n        ...  # ← 在這裡寫程式（可以多行）\n    elif mode == "finetune":\n        model = load_backbone(backbone, pretrained=True)\n    elif mode == "scratch":\n        model = load_backbone(backbone, pretrained=____)   # TODO 3-2` },
+  9: { where: "5-2 下方那一格（跟 TODO 3 同一格）", todo: true, steps: ["在 replace_head 函式裡找到 TODO 4", "把兩個 ____ 都填好", "執行這一格，再執行「✔ 自我檢查 TODO 3、4」，最後執行「5-3」看每一層的參數"],
+       code: `def replace_head(model, name):\n    if name == "resnet18":\n        model.fc = nn.Linear(____, ____)   # TODO 4` },
+  10: { where: "6-2｜✏️ TODO 5", todo: true, steps: ["找到 train_step 函式", "在 ... 的位置，依正確順序寫出五行", "執行這一格，再執行「6-4｜👀 親眼看看」，看到 conv1 沒變、fc 變了就完成了"],
+       code: `def train_step(model, x, y, optimizer, loss_fn):\n    # TODO 5：依正確順序寫出五個步驟\n    ...  # ← 在這裡寫程式（可以多行）\n    return out, loss.item()` },
+  11: { where: "6-3｜✏️ TODO 6", todo: true, steps: ["TODO 6 跟 TODO 5 在同一格，找到 count_correct 函式", "在 ... 的位置寫兩行，記得 return", "執行這一格，再執行「✔ 自我檢查 TODO 6」"],
+       code: `def count_correct(logits, y):\n    # TODO 6：回傳猜對的張數（整數）\n    ...  # ← 在這裡寫程式（可以多行）` },
+  12: { where: "6-5、6-6", steps: ["執行「6-5｜開始訓練（基準實驗）」，等三種方式都跑完", "執行「6-6｜學習曲線」", "📝 寫學習單 A1、A2"] },
+  13: { where: "6-7｜⏱ 計時賽", steps: ["執行前先在學習單 A3 寫下你的預測", "依序執行 6-7 的三格：準備、第一回合、第二回合", "📝 把兩回合的結果抄到學習單 A3"] },
+  14: { where: "6-8｜★★ 挑戰 C（選做）", steps: ["往上找到「6-5」那一格的 train_one 函式", "在三個位置加程式（見「6-8」的表格）", "重新執行 6-5 和 6-6，看到 loss 曲線和 ✅ 就完成了"] },
+  15: { where: "第 7 節｜我的實驗", steps: ["📝 先在學習單 A4 寫下要改的變因和預測", "把 MY_CHANGE 改成你選的變因，例如 {\"TRAIN_LIMIT\": 5}", "執行，📝 把結果抄到學習單 A4"], code: `MY_CHANGE = ____` },
+  16: { where: "8-1｜✏️ TODO 7", todo: true, steps: ["找到 predict 函式", "在 ... 的位置算出 probs 和 best", "執行這一格（自我檢查在同一格），再執行「8-2｜拍照測試」，📝 寫學習單 A5"],
+       code: `def predict(model, x):\n    model.eval()\n    with torch.no_grad():\n        logits = model(x)\n    # TODO 7：算出 probs（三個機率）和 best（機率最高的類別編號，整數）\n    ...  # ← 在這裡寫程式（可以多行）\n    return probs, best` },
+  17: { where: "第 9 節", steps: ["📝 完成學習單 Part B（課堂寫初稿，一週內補完）", "繳交 Colab 檔：檔案 → 下載 → 下載 .ipynb"] }
+};
+function colabCard(i) {
+  const c = COLAB[i]; if (!c) return null;
+  const pre = c.code ? h("pre", { class: "code", html: highlight(c.code).replace(/____/g, '<span class="blank">____</span>').replace(/\.\.\.(?=\s+<span class="tk-c">)/g, '<span class="blank">...</span>') }) : null;
+  return h("div", { class: "colab", id: "colab" + i },
+    h("div", { class: "colab-head" }, h("span", {}, "🖥️ 回到 Colab"), h("span", { class: "where" }, c.where)),
+    h("div", { class: "colab-body" }, h("ol", {}, ...c.steps.map(t => h("li", {}, t))),
+      pre ? h("p", { class: "small" }, "Colab 裡你會看到這一段（橘色的地方要你填）：") : null, pre));
+}
 
-        <!-- ================= 第 4 頁：TODO 1 ================= -->
-        <section id="page-4" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-blue-700 mb-3 flex items-baseline gap-2">3-1｜TODO 1：影像就是數字<span class="text-base font-normal text-blue-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-blue-50 p-4 rounded-xl border-l-4 border-blue-500 shadow-sm">
-                    <strong>學習目標：</strong>了解影像在電腦中是如何以張量（tensor）的形式儲存與表示。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">互動內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(4)" id="btn-ans-4" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示答案</button>
-                <div id="ans-box-4" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># TODO 1 答案將在此顯示</code></pre></div>
-            </footer>
-        </section>
+/* ═════════ 換頁架構 ═════════ */
+let current = 0;
+const main = $("#main");
+function pageHead(i) {
+  const p = PAGES[i];
+  const tags = h("div", { class: "tags" },
+    h("span", { class: "numtag" }, p.num), h("span", { class: "numnote" }, "對應 Colab"),
+    p.todo ? h("span", { class: "chip todo" }, "✏️ " + p.todo) : null,
+    p.bonus ? h("span", { class: "chip bonus" }, p.bonus) : null);
+  const jump = COLAB[i] && COLAB[i].todo ? h("button", { class: "tocolab", type: "button", onclick: () => $("#colab" + i).scrollIntoView({ behavior: "smooth" }) }, "✏️ 看完這頁 → 回 Colab「" + COLAB[i].where + "」填空 ↓") : null;
+  return h("div", { class: "phead" }, tags, h("h2", {}, p.title), p.goal ? h("p", { class: "goal" }, p.goal) : null, jump);
+}
+function buildAll() {
+  PAGES.forEach((p, i) => {
+    const sec = h("section", { class: "page", id: "p" + i, style: `--gc:${GROUPS[p.g].color}`, "aria-label": p.title });
+    if (i > 0) sec.append(pageHead(i));
+    if (BUILDERS[i]) BUILDERS[i].build(sec);
+    else sec.append(h("div", { class: "wip" }, "內容製作中"));
+    if (i > 0) { const cc = colabCard(i); if (cc) sec.append(cc); }
+    if (p.answer) sec.append(answer(codeBlock(p.answer)));
+    main.append(sec);
+  });
+  const prog = $("#progress");
+  GROUPS.forEach((g, gi) => {
+    const wrap = h("div", { class: "pgroup", style: `--gc:${g.color}` }, h("span", { class: "pgroup-label" }, g.name));
+    PAGES.forEach((p, i) => {
+      if (p.g !== gi) return;
+      wrap.append(h("button", { class: "dot", type: "button", "data-title": (p.num ? p.num + "｜" : "") + p.title, "aria-label": p.title, onclick: () => go(i) }));
+    });
+    prog.append(wrap);
+  });
+}
+function go(i) {
+  i = Math.max(0, Math.min(PAGES.length - 1, i));
+  if (BUILDERS[current] && BUILDERS[current].leave) BUILDERS[current].leave();
+  Timers.clear();
+  $$(".page").forEach(s => s.classList.remove("active"));
+  current = i;
+  $("#p" + i).classList.add("active");
+  $$(".dot").forEach((d, k) => { d.classList.toggle("current", k === i); d.classList.toggle("done", k < i); });
+  $("#prevBtn").disabled = i === 0;
+  $("#nextBtn").disabled = i === PAGES.length - 1;
+  $("#counter").innerHTML = `<b>${i + 1}</b> / ${PAGES.length}`;
+  if (BUILDERS[i] && BUILDERS[i].enter) BUILDERS[i].enter();
+  try { history.replaceState(null, "", "#p" + i); } catch (e) { /* 預覽視窗等受限環境不允許改網址，略過即可 */ }
+  window.scrollTo({ top: 0 });
+}
+$("#prevBtn").onclick = () => go(current - 1);
+$("#nextBtn").onclick = () => go(current + 1);
+document.addEventListener("keydown", e => {
+  const t = e.target.tagName;
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(t) || e.target.isContentEditable) return;
+  if (e.key === "ArrowRight") go(current + 1);
+  if (e.key === "ArrowLeft") go(current - 1);
+});
+</script>
 
-        <!-- ================= 第 5 頁：延伸挑戰 (手算卷積) ================= -->
-        <section id="page-5" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-amber-600 mb-3 flex items-center flex-wrap gap-2">
-                    3-2｜★ 延伸挑戰：手算卷積
-                    <span class="text-base font-normal text-amber-500">(對應 Colab)</span>
-                    <span class="px-3 py-1 bg-amber-100 text-amber-700 text-sm font-bold rounded-full">加分題，兩題任選一題</span>
-                </h2>
-                <p class="text-xl text-slate-700 bg-amber-50 p-4 rounded-xl border-l-4 border-amber-500 shadow-sm">
-                    <strong>目標：</strong>體驗卷積層 (Convolution) 是如何把影像特徵「掃描」出來的。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(5)" id="btn-ans-5" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示解答</button>
-                <div id="ans-box-5" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># 延伸挑戰解答將在此顯示</code></pre></div>
-            </footer>
-        </section>
+<!-- ═════════ 各頁內容 ═════════ -->
+<script>
+/* ───── 封面 ───── */
+BUILDERS[0] = {
+  build(sec) {
+    sec.append(h("div", { style: "margin-top:20px" },
+      h("p", { class: "small", style: "letter-spacing:.12em" }, "高二資訊專題｜影像辨識實作"),
+      h("h1", { class: "cover-title" }, "剪刀石頭布影像辨識：揭開模型訓練的黑箱"),
+      h("p", { class: "cover-sub" }, "從 Teachable Machine 的一個按鈕，到你親手寫的 PyTorch 程式")));
+    const map = h("div", { class: "map" });
+    GROUPS.forEach((g, gi) => {
+      const col = h("div", { class: "map-col", style: `--gc:${g.color}` }, h("h3", {}, g.name));
+      PAGES.forEach((p, i) => {
+        if (p.g !== gi || i === 0) return;
+        col.append(h("button", { class: "map-item", type: "button", onclick: () => go(i) },
+          h("span", { class: "mono" }, p.num), h("span", {}, (p.todo ? p.todo + "：" : "") + p.title)));
+      });
+      map.append(col);
+    });
+    sec.append(map);
+  }
+};
+</script>
+<script>
+/* ───── 頁 1：開始之前 ───── */
+BUILDERS[1] = {
+  build(sec) {
+    /* A. Colab 是什麼 */
+    const tabA = h("div", { class: "stack" },
+      h("div", { class: "card", html: `
+        <svg viewBox="0 0 760 210" style="width:100%;max-width:760px;height:auto" role="img" aria-label="你的電腦透過網路連到 Google 的雲端電腦">
+          <rect x="10" y="30" width="240" height="150" rx="12" fill="var(--paper)" stroke="var(--line)" stroke-width="2"/>
+          <text x="130" y="70" text-anchor="middle" font-size="22" font-weight="700" fill="var(--ink)">你的電腦</text>
+          <text x="130" y="104" text-anchor="middle" font-size="17" fill="var(--muted)">瀏覽器只負責「顯示」</text>
+          <text x="130" y="132" text-anchor="middle" font-size="17" fill="var(--muted)">和「按按鈕」</text>
+          <rect x="510" y="30" width="240" height="150" rx="12" fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="2"/>
+          <text x="630" y="70" text-anchor="middle" font-size="22" font-weight="700" fill="var(--ink)">Google 的雲端電腦</text>
+          <text x="630" y="104" text-anchor="middle" font-size="17" fill="var(--ink)">真正執行 Python 的地方</text>
+          <text x="630" y="132" text-anchor="middle" font-size="17" fill="var(--ink)">（有機會分到 GPU）</text>
+          <line x1="262" y1="90" x2="498" y2="90" stroke="var(--accent)" stroke-width="3" marker-end="url(#ar)"/>
+          <line x1="498" y1="122" x2="262" y2="122" stroke="var(--teal)" stroke-width="3" marker-end="url(#ar2)"/>
+          <text x="380" y="80" text-anchor="middle" font-size="16" fill="var(--accent)">送出程式</text>
+          <text x="380" y="146" text-anchor="middle" font-size="16" fill="var(--teal)">傳回結果</text>
+          <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--teal)"/></marker></defs>
+        </svg>` }),
+      h("div", { class: "card stack" },
+        h("h3", {}, "筆記本由一格一格的「儲存格」組成"),
+        h("div", { class: "row" },
+          h("div", { class: "grow note teal" }, h("b", {}, "文字格："), "說明、標題、表格。不會執行。"),
+          h("div", { class: "grow note" }, h("b", {}, "程式格："), "左邊有 ▶，按下去才會把這一格送到雲端執行。")),
+        h("p", { class: "small" }, "所以你電腦的效能不太重要，重要的是有沒有連上網路、雲端電腦有沒有分到 GPU。")));
 
-        <!-- ================= 第 6 頁：TODO 2 ================= -->
-        <section id="page-6" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-blue-700 mb-3 flex items-baseline gap-2">4-1｜TODO 2：資料擴增<span class="text-base font-normal text-blue-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-blue-50 p-4 rounded-xl border-l-4 border-blue-500 shadow-sm">
-                    <strong>學習目標：</strong>學會對影像進行隨機變換，讓模型看過更多樣貌，提升泛化能力。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">互動內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(6)" id="btn-ans-6" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示答案</button>
-                <div id="ans-box-6" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># TODO 2 答案將在此顯示</code></pre></div>
-            </footer>
-        </section>
+    /* B. 為什麼要由上往下執行 */
+    const cells = [
+      { code: "x = 5", run: s => { s.x = 5; } },
+      { code: "y = x * 2", run: s => { if (!("x" in s)) throw "NameError: name 'x' is not defined"; s.y = s.x * 2; } },
+      { code: "print(y)", run: s => { if (!("y" in s)) throw "NameError: name 'y' is not defined"; return String(s.y); } }
+    ];
+    let state = {}, count = 0;
+    const rows = cells.map((c, i) => {
+      const num = h("span", { class: "mono", style: "width:3.2em;color:var(--muted)" }, "[ ]");
+      const out = h("div", { class: "mono", style: "min-height:1.6em;padding-left:4.6em" });
+      const btn = h("button", { class: "btn", type: "button", "aria-label": "執行第 " + (i + 1) + " 格" }, "▶");
+      btn.onclick = () => {
+        count++; num.textContent = `[${count}]`;
+        try { const r = c.run(state); out.className = "mono"; out.textContent = r ?? ""; }
+        catch (e) { out.className = "mono err"; out.textContent = e; }
+        explain();
+      };
+      return h("div", { style: "border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--code-bg)" },
+        h("div", { class: "row", style: "align-items:center;gap:12px" }, btn, num, h("code", { style: "font-size:20px" }, c.code)), out);
+    });
+    const msg = h("p", { class: "note teal" }, "試試看：先按第 2 格或第 3 格的 ▶，會發生什麼事？");
+    function explain() {
+      if ($$(".err", tabB).length) msg.innerHTML = "出現 <b>NameError</b> 了！Colab 會記住「已經執行過」的結果。跳過前面的格子，後面就找不到變數。請按「重新啟動」，再由上往下執行一次。";
+      else if (state.y !== undefined && count >= 3) msg.innerHTML = "<span class='ok'>✅ 依序執行，成功印出 10。</span>";
+    }
+    const reset = h("button", { class: "btn", type: "button", onclick: () => {
+      state = {}; count = 0; rows.forEach(r => { $(".mono", r).textContent = "[ ]"; r.lastChild.textContent = ""; r.lastChild.className = "mono"; });
+      msg.textContent = "已重新啟動：所有變數都清空了。試試看依 1 → 2 → 3 的順序執行。";
+    } }, "↻ 重新啟動（清空記憶）");
+    const tabB = h("div", { class: "stack" }, h("div", { class: "card stack" }, ...rows, h("div", { class: "btns" }, reset)), msg);
 
-        <!-- ================= 第 7 頁：第 4 節 ================= -->
-        <section id="page-7" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-blue-700 mb-3 flex items-baseline gap-2">4-1｜三組資料：訓練、驗證、挑戰<span class="text-base font-normal text-blue-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-blue-50 p-4 rounded-xl border-l-4 border-blue-500 shadow-sm">
-                    <strong>目標：</strong>了解為何需要把資料切開，以及驗證集（Validation）和測試集（Test）的用途。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleHint(7)" id="btn-hint-7" class="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300 transition-colors shadow-sm">想一想</button>
-                <div id="hint-box-7" class="hidden mt-4 bg-slate-50 border border-slate-200 p-6 rounded-xl shadow-sm text-lg text-slate-700">
-                    <p><strong>想一想：</strong>平常段考的題目（挑戰集），老師會在考前發下來給你當練習（訓練集）嗎？為什麼不行？</p>
-                </div>
-            </footer>
-        </section>
+    /* C. 開始前的 4 個步驟 */
+    const steps = [
+      ["在雲端硬碟中儲存副本", "不要直接改老師的檔案。", ["檔案", "在雲端硬碟中儲存副本"]],
+      ["改檔名", "點左上角的檔名，把最後的「學生版」改成你的班級座號姓名（檔名正確占 3 分）。", null],
+      ["選 T4 GPU", "分不到 GPU 也沒關係，用 CPU 一樣跑得完，只是比較慢。", ["執行階段", "變更執行階段類型", "T4 GPU"]],
+      ["由上往下依序執行", "出錯時，先看錯誤訊息的最後一行。", null]
+    ];
+    const done = h("p", { class: "note teal", hidden: "" }, h("b", {}, "✅ 準備完成！"), "可以開始拍照了。");
+    const checks = steps.map(([t, d, path], i) => {
+      const cb = h("input", { type: "checkbox", id: "step" + i, style: "width:24px;height:24px" });
+      cb.onchange = () => { done.hidden = !$$("input[type=checkbox]", tabC).every(x => x.checked); };
+      let mock = null;
+      if (path) mock = h("div", { class: "btns", style: "font-size:16px" }, ...path.flatMap((p, k) => [k ? h("span", { class: "small" }, "›") : null, h("span", { style: "border:1px solid var(--line);border-radius:4px;padding:1px 8px;background:var(--paper)" }, p)]));
+      if (i === 1) mock = h("div", { class: "mono", style: "font-size:17px" }, "剪刀石頭布_影像辨識實作_",
+        h("s", { style: "color:var(--bad)" }, "學生版"), " → ", h("b", { style: "color:var(--teal)" }, "20512王小明"));
+      return h("label", { for: "step" + i, class: "card row", style: "align-items:center;cursor:pointer;padding:14px 18px" },
+        cb, h("div", { class: "grow" }, h("b", {}, `${i + 1}. ${t}`), h("p", { class: "small" }, d), mock));
+    });
+    const tabC = h("div", { class: "stack" }, ...checks, done);
 
-        <!-- ================= 第 8 頁：TODO 3 ================= -->
-        <section id="page-8" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-indigo-700 mb-3 flex items-baseline gap-2">5-1｜TODO 3：凍結、微調、從零<span class="text-base font-normal text-indigo-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-indigo-50 p-4 rounded-xl border-l-4 border-indigo-500 shadow-sm">
-                    <strong>學習目標：</strong>認識遷移學習的三種策略，並決定何時該更新模型權重。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">互動內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(8)" id="btn-ans-8" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示答案</button>
-                <div id="ans-box-8" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># TODO 3 答案將在此顯示</code></pre></div>
-            </footer>
-        </section>
+    /* D. GPU 和 CPU */
+    const N = 256;
+    const mkBoard = () => h("div", { style: "display:grid;grid-template-columns:repeat(32,1fr);gap:2px;max-width:520px" },
+      ...Array.from({ length: N }, () => h("span", { style: "aspect-ratio:1;background:var(--line);border-radius:2px" })));
+    const cpu = mkBoard(), gpu = mkBoard();
+    const cpuT = h("span", { class: "mono" }, "0.0 秒"), gpuT = h("span", { class: "mono" }, "0.0 秒");
+    function runRace() {
+      Timers.clear();
+      [cpu, gpu].forEach(b => [...b.children].forEach(c => (c.style.background = "var(--line)")));
+      let ci = 0, gi = 0, t = 0;
+      const id = Timers.interval(() => {
+        t += 0.12;
+        if (ci < N) { for (let k = 0; k < 4 && ci < N; k++) cpu.children[ci++].style.background = "var(--g0)"; cpuT.textContent = t.toFixed(1) + " 秒"; }
+        if (gi < N) { for (let k = 0; k < 64 && gi < N; k++) gpu.children[gi++].style.background = "var(--teal)"; gpuT.textContent = t.toFixed(1) + " 秒"; }
+        if (ci >= N && gi >= N) clearInterval(id);
+      }, 120);
+    }
+    const tabD = h("div", { class: "stack" },
+      h("p", {}, "神經網路要做「非常大量、但每一個都很簡單」的乘法和加法。下面每一個小方格代表一個計算。"),
+      h("div", { class: "row" },
+        h("div", { class: "card grow stack" }, h("h3", {}, "CPU：4 位很厲害的數學老師"), cpu, h("p", {}, "完成時間：", cpuT)),
+        h("div", { class: "card grow stack" }, h("h3", {}, "GPU：幾千位只會簡單計算的小幫手"), gpu, h("p", {}, "完成時間：", gpuT))),
+      h("div", { class: "btns" }, h("button", { class: "btn primary", type: "button", onclick: runRace }, "▶ 開始計算")),
+      h("p", { class: "small" }, "示意動畫，不是真實速度。分不到 GPU 也沒關係，CPU 一樣跑得完，只是比較慢。"));
 
-        <!-- ================= 第 9 頁：TODO 4 ================= -->
-        <section id="page-9" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-indigo-700 mb-3 flex items-baseline gap-2">5-2～5-3｜TODO 4：換掉最後一層<span class="text-base font-normal text-indigo-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-indigo-50 p-4 rounded-xl border-l-4 border-indigo-500 shadow-sm">
-                    <strong>學習目標：</strong>修改 ResNet18 的輸出層，使其符合我們剪刀、石頭、布的三個類別。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">互動內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(9)" id="btn-ans-9" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示答案</button>
-                <div id="ans-box-9" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># TODO 4 答案將在此顯示</code></pre></div>
-            </footer>
-        </section>
+    /* E. 出錯時看哪裡 */
+    const tb = [
+      "---------------------------------------------------------------------------",
+      "NameError                                 Traceback (most recent call last)",
+      "/tmp/ipykernel_215/3051837142.py in <cell line: 0>()",
+      "      1 sample_path = sorted(glob.glob(os.path.join(TRAIN_DIR, \"rock\", \"*.jpg\")))[0]",
+      "----> 2 img = Image.open(sample_path)",
+      "      3 arr = np.array(img)",
+      "",
+      "NameError: name 'Image' is not defined"
+    ];
+    const tbPre = h("pre", { class: "code", style: "color:var(--bad)" }, ...tb.map((l, i) => h("div", { "data-i": i }, l || " ")));
+    const tbMsg = h("p", { class: "note", hidden: "" }, "最後一行說：", h("code", {}, "Image"), " 這個名字還沒定義。通常是「第 1 節｜環境設定」那一格還沒執行（Image 是在那裡載入的）。往上找，把漏掉的格子執行一次就好。");
+    const tabE = h("div", { class: "stack" },
+      h("p", {}, "Python 出錯時會印出一大段紅字，叫做 Traceback。看起來很嚇人，但原因幾乎都寫在", h("b", {}, "最後一行"), "。"),
+      tbPre,
+      h("div", { class: "btns" }, h("button", { class: "btn primary", type: "button", onclick: () => {
+        const last = tbPre.lastChild;
+        $$("div", tbPre).forEach(d => (d.style.opacity = ".35"));
+        last.style.opacity = "1"; last.style.background = "var(--accent-soft)"; last.style.fontWeight = "700";
+        tbMsg.hidden = false;
+      } }, "找出重點")), tbMsg);
 
-        <!-- ================= 第 10 頁：TODO 5 ================= -->
-        <section id="page-10" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-emerald-700 mb-3 flex items-baseline gap-2">6-1～6-2｜TODO 5：訓練的五個步驟<span class="text-base font-normal text-emerald-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-emerald-50 p-4 rounded-xl border-l-4 border-emerald-500 shadow-sm">
-                    <strong>學習目標：</strong>掌握 PyTorch 訓練的標準迴圈：正向傳播、算誤差、清空梯度、反向傳播、更新權重。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">互動內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(10)" id="btn-ans-10" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示答案</button>
-                <div id="ans-box-10" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># TODO 5 答案將在此顯示</code></pre></div>
-            </footer>
-        </section>
+    /* F. 個資提醒 */
+    const tabF = h("div", { class: "row" },
+      h("div", { class: "card grow stack" }, h("h3", { class: "ok" }, "✔ 這樣拍"),
+        h("div", { html: handSVG("scissors", { size: 140 }) }), h("p", {}, "鏡頭只對準手，背景單純。")),
+      h("div", { class: "card grow stack" }, h("h3", { class: "err" }, "✘ 不要這樣"),
+        h("ul", { style: "margin:0;padding-left:1.2em" }, h("li", {}, "拍到自己或同學的臉"), h("li", {}, "背景有名牌、學生證、螢幕畫面"), h("li", {}, "把含臉的照片存到雲端或傳給別人"))));
 
-        <!-- ================= 第 11 頁：TODO 6 ================= -->
-        <section id="page-11" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-emerald-700 mb-3 flex items-baseline gap-2">6-3｜TODO 6：計算猜對幾張<span class="text-base font-normal text-emerald-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-emerald-50 p-4 rounded-xl border-l-4 border-emerald-500 shadow-sm">
-                    <strong>學習目標：</strong>從模型的輸出中找出預測類別，並與正確答案比對來計算準確率。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">互動內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(11)" id="btn-ans-11" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示答案</button>
-                <div id="ans-box-11" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># TODO 6 答案將在此顯示</code></pre></div>
-            </footer>
-        </section>
+    sec.append(makeTabs([
+      { label: "Colab 是什麼", content: tabA }, { label: "為什麼要由上往下執行", content: tabB },
+      { label: "開始前的 4 個步驟", content: tabC }, { label: "GPU 和 CPU", content: tabD },
+      { label: "出錯時看哪裡", content: tabE }, { label: "個資提醒", content: tabF }
+    ]));
+    sec.append(think("Colab 斷線或關掉分頁一段時間後，雲端電腦會怎樣？",
+      h("p", {}, "雲端電腦會被回收，上面的變數和照片都會消失。重新連線後，要從頭再執行一次；照片可以用「2-6 備份」先下載保存。")));
+  }
+};
 
-        <!-- ================= 第 12 頁：第 6 節 ================= -->
-        <section id="page-12" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-emerald-700 mb-3 flex items-baseline gap-2">6-5～6-6｜看懂訓練結果<span class="text-base font-normal text-emerald-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-emerald-50 p-4 rounded-xl border-l-4 border-emerald-500 shadow-sm">
-                    <strong>目標：</strong>觀察 Loss（誤差）與 Accuracy（準確率）的變化，判斷模型是否正常學習。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleHint(12)" id="btn-hint-12" class="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300 transition-colors shadow-sm">想一想</button>
-                <div id="hint-box-12" class="hidden mt-4 bg-slate-50 border border-slate-200 p-6 rounded-xl shadow-sm text-lg text-slate-700">
-                    <p><strong>想一想：</strong>如果訓練準確率 99%，但驗證準確率只有 50%，可能發生了什麼事？</p>
-                </div>
-            </footer>
-        </section>
+/* ───── 頁 2：拍照蒐集資料 ───── */
+BUILDERS[2] = {
+  build(sec) {
+    const KINDS = { rock: "石頭", paper: "布", scissors: "剪刀" };
+    const thumbs = (n, opts) => h("div", { class: "btns", style: "gap:4px" },
+      ...Array.from({ length: n }, () => h("span", { html: handSVG(opts.kind, { size: 64, dx: rand(-4, 4), dy: rand(-4, 4), rot: rand(-8, 8), ...opts }) })));
+    const compare = h("div", { class: "row" },
+      h("div", { class: "card grow stack" }, h("h3", {}, "訓練照片｜每種手勢 30 張"),
+        h("p", {}, "坐在原位、同一個背景，手在鏡頭前", h("b", {}, "慢慢移動、轉動"), "。"), thumbs(4, { kind: "paper" }), h("p", { class: "small" }, "用途：給模型學習")),
+      h("div", { class: "card grow stack" }, h("h3", {}, "挑戰照片｜每種手勢 10 張"),
+        h("p", {}, "刻意", h("b", {}, "換條件"), "：換另一隻手、換背景、拉遠拉近、換光線。"),
+        h("div", { class: "btns", style: "gap:4px" },
+          h("span", { html: handSVG("paper", { size: 64, flip: true }) }), h("span", { html: handSVG("paper", { size: 64, bg: "#f2d7a6" }) }),
+          h("span", { html: handSVG("paper", { size: 64, scale: .6 }) }), h("span", { html: handSVG("paper", { size: 64, dark: .45 }) })),
+        h("p", { class: "small" }, "用途：考模型「真正學會了沒」")));
 
-        <!-- ================= 第 13 頁：第 6 節 (時間) ================= -->
-        <section id="page-13" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-emerald-700 mb-3 flex items-baseline gap-2">6-7｜⏱ 計時賽<span class="text-base font-normal text-emerald-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-emerald-50 p-4 rounded-xl border-l-4 border-emerald-500 shadow-sm">
-                    <strong>目標：</strong>分析訓練程式的效能瓶頸，了解每一步驟花費的時間。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <!-- 這頁不放提問 -->
-        </section>
-
-        <!-- ================= 第 14 頁：延伸挑戰 (Loss) ================= -->
-        <section id="page-14" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-amber-600 mb-3 flex items-center flex-wrap gap-2">
-                    6-8｜★ 延伸挑戰：記錄 loss 曲線
-                    <span class="text-base font-normal text-amber-500">(對應 Colab)</span>
-                    <span class="px-3 py-1 bg-amber-100 text-amber-700 text-sm font-bold rounded-full">加分題，兩題任選一題</span>
-                </h2>
-                <p class="text-xl text-slate-700 bg-amber-50 p-4 rounded-xl border-l-4 border-amber-500 shadow-sm">
-                    <strong>目標：</strong>透過 Python 將訓練過程的數字畫成折線圖，一眼看出學習趨勢。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(14)" id="btn-ans-14" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示解答</button>
-                <div id="ans-box-14" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># 延伸挑戰解答將在此顯示</code></pre></div>
-            </footer>
-        </section>
-
-        <!-- ================= 第 15 頁：第 7 節 ================= -->
-        <section id="page-15" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-rose-700 mb-3 flex items-baseline gap-2">第 7 節｜我的實驗：只改一個變因<span class="text-base font-normal text-rose-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-rose-50 p-4 rounded-xl border-l-4 border-rose-500 shadow-sm">
-                    <strong>目標：</strong>回到上面的程式，嘗試調整參數（超參數），觀察對結果的影響。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleHint(15)" id="btn-hint-15" class="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300 transition-colors shadow-sm">想一想</button>
-                <div id="hint-box-15" class="hidden mt-4 bg-slate-50 border border-slate-200 p-6 rounded-xl shadow-sm text-lg text-slate-700">
-                    <p><strong>想一想：</strong>如果我把 Epoch 從 5 改成 50，Learning Rate 也調大 10 倍，結果變得很差。我該怎麼知道是誰害的？</p>
-                </div>
-            </footer>
-        </section>
-
-        <!-- ================= 第 16 頁：TODO 7 ================= -->
-        <section id="page-16" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-rose-700 mb-3 flex items-baseline gap-2">8-1｜TODO 7：把分數變成機率<span class="text-base font-normal text-rose-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-rose-50 p-4 rounded-xl border-l-4 border-rose-500 shadow-sm">
-                    <strong>學習目標：</strong>使用 Softmax 函數將模型輸出的分數轉換為總和為 1 的機率。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">互動內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleAnswer(16)" id="btn-ans-16" class="px-6 py-3 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700 transition-colors shadow-sm">顯示答案</button>
-                <div id="ans-box-16" class="hidden mt-4 bg-slate-900 rounded-xl overflow-hidden shadow-lg"><pre class="m-0 p-4 text-lg"><code class="language-python"># TODO 7 答案將在此顯示</code></pre></div>
-            </footer>
-        </section>
-
-        <!-- ================= 第 17 頁：第 9 節 ================= -->
-        <section id="page-17" class="page w-full max-w-6xl flex-col h-full">
-            <header class="mb-6 shrink-0">
-                <h2 class="text-3xl font-bold text-rose-700 mb-3 flex items-baseline gap-2">第 9 節｜回到你的題目<span class="text-base font-normal text-rose-500">(對應 Colab)</span></h2>
-                <p class="text-xl text-slate-700 bg-rose-50 p-4 rounded-xl border-l-4 border-rose-500 shadow-sm">
-                    <strong>目標：</strong>將今天學到的流程，應用到你們組別自己的期末專題中。
-                </p>
-            </header>
-            <div class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm p-8 flex items-center justify-center mb-6 overflow-hidden">
-                <div class="text-center text-slate-400"><p class="text-2xl font-medium">內容製作中...</p></div>
-            </div>
-            <footer class="shrink-0 border-t-2 border-slate-100 pt-4">
-                <button onclick="toggleHint(17)" id="btn-hint-17" class="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300 transition-colors shadow-sm">想一想</button>
-                <div id="hint-box-17" class="hidden mt-4 bg-slate-50 border border-slate-200 p-6 rounded-xl shadow-sm text-lg text-slate-700">
-                    <p><strong>想一想：</strong>你的題目，要拍什麼樣的照片？會分成哪些類別？</p>
-                </div>
-            </footer>
-        </section>
-
-    </main>
-
-    <!-- 底部導覽列 -->
-    <footer class="bg-white border-t border-slate-200 px-4 md:px-6 py-4 flex items-center justify-between z-20 shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <button id="btn-prev" onclick="changePage(-1)" class="px-4 md:px-6 py-3 bg-slate-100 rounded-xl font-bold text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-200 hover:text-slate-900 transition-all active:scale-95 flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-            <span class="hidden md:inline">上一步</span>
-        </button>
-        
-        <div class="text-center flex flex-col mx-2 overflow-hidden max-w-[50%]">
-            <div id="page-indicator" class="font-black text-slate-700 text-lg md:text-xl tracking-widest">1 / 18</div>
-            <div id="page-title-indicator" class="text-sm font-medium text-slate-400 mt-1 truncate">封面</div>
-        </div>
-        
-        <button id="btn-next" onclick="changePage(1)" class="px-4 md:px-6 py-3 bg-blue-600 rounded-xl font-bold text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-blue-700 transition-all active:scale-95 flex items-center gap-2 shadow-sm shadow-blue-200">
-            <span class="hidden md:inline">下一步</span>
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-        </button>
-    </footer>
-
-    <script>
-        // === 網頁內容資料定義 ===
-        // 將群組以顏色與名稱定義好
-        const groupInfo = {
-            prep: { color: 'bg-slate-500', hover: 'hover:bg-slate-600', dotActive: 'bg-slate-500 ring-slate-200', dotInactive: 'bg-slate-300' },
-            data: { color: 'bg-blue-500', hover: 'hover:bg-blue-600', dotActive: 'bg-blue-500 ring-blue-200', dotInactive: 'bg-blue-200' },
-            model: { color: 'bg-indigo-500', hover: 'hover:bg-indigo-600', dotActive: 'bg-indigo-500 ring-indigo-200', dotInactive: 'bg-indigo-200' },
-            train: { color: 'bg-emerald-500', hover: 'hover:bg-emerald-600', dotActive: 'bg-emerald-500 ring-emerald-200', dotInactive: 'bg-emerald-200' },
-            exp: { color: 'bg-rose-500', hover: 'hover:bg-rose-600', dotActive: 'bg-rose-500 ring-rose-200', dotInactive: 'bg-rose-200' }
-        };
-
-        const pageData = [
-            { id: 0, title: "封面", label: "Cover", group: "prep" },
-            { id: 1, title: "開始之前", label: "第 0 節", group: "prep" },
-            { id: 2, title: "拍照蒐集資料", label: "2-1～2-2", group: "data" },
-            { id: 3, title: "照片存在哪裡？", label: "2-3～2-6", group: "data" },
-            { id: 4, title: "影像就是數字", label: "3-1", group: "data" },
-            { id: 5, title: "手算卷積", label: "3-2", group: "data" },
-            { id: 6, title: "資料擴增", label: "4-1", group: "data" },
-            { id: 7, title: "三組資料：訓練、驗證、挑戰", label: "4-1", group: "data" },
-            { id: 8, title: "凍結、微調、從零", label: "5-1", group: "model" },
-            { id: 9, title: "換掉最後一層", label: "5-2～5-3", group: "model" },
-            { id: 10, title: "訓練的五個步驟", label: "6-1～6-2", group: "train" },
-            { id: 11, title: "計算猜對幾張", label: "6-3", group: "train" },
-            { id: 12, title: "看懂訓練結果", label: "6-5～6-6", group: "train" },
-            { id: 13, title: "⏱ 計時賽", label: "6-7", group: "train" },
-            { id: 14, title: "記錄 loss 曲線", label: "6-8", group: "train" },
-            { id: 15, title: "我的實驗：只改一個變因", label: "第 7 節", group: "exp" },
-            { id: 16, title: "把分數變成機率", label: "8-1", group: "exp" },
-            { id: 17, title: "回到你的題目", label: "第 9 節", group: "exp" }
-        ];
-
-        let currentPage = 0;
-        const totalPages = pageData.length;
-
-        const pageHooks = {
-            onEnter: {},
-            onLeave: {}
-        };
-
-        function registerPage(pageIndex, enterCallback, leaveCallback) {
-            pageHooks.onEnter[pageIndex] = enterCallback;
-            pageHooks.onLeave[pageIndex] = leaveCallback;
+    /* 連拍模擬 */
+    const kindSel = h("select", { id: "burstKind" }, ...Object.entries(KINDS).map(([k, v]) => h("option", { value: k }, v)));
+    const big = h("div", { style: "font-size:64px;font-weight:900;color:var(--accent);min-height:80px", "aria-live": "polite" });
+    const strip = h("div", { class: "btns", style: "gap:3px" });
+    const status = h("p", { class: "small" }, "倒數 3 秒後連拍，大約每 0.25 秒一張。");
+    function burst() {
+      Timers.clear(); strip.innerHTML = ""; let c = 3;
+      big.textContent = c;
+      const cd = Timers.interval(() => {
+        c--; big.textContent = c > 0 ? c : "拍！";
+        if (c <= 0) {
+          clearInterval(cd); let n = 0;
+          const shot = Timers.interval(() => {
+            n++; strip.append(h("span", { html: handSVG(kindSel.value, { size: 52, dx: rand(-4, 4), dy: rand(-4, 4), rot: rand(-7, 7) }) }));
+            status.textContent = `拍攝中 ${n} / 30`;
+            if (n >= 30) { clearInterval(shot); big.textContent = ""; status.innerHTML = "拍完了！仔細看：<b>前後幾張幾乎一模一樣</b>。記住這件事，後面會用到。"; }
+          }, 250);
         }
+      }, 1000);
+    }
+    const burstCard = h("div", { class: "card stack" }, h("h3", {}, "連拍模擬"),
+      h("div", { class: "btns" }, h("label", { for: "burstKind" }, "手勢："), kindSel, h("button", { class: "btn primary", type: "button", onclick: burst }, "▶ 開始連拍")),
+      big, strip, status);
 
-        function initUI() {
-            const dotsContainer = document.getElementById('top-nav-dots');
-            let lastGroup = null;
-            
-            pageData.forEach((page, index) => {
-                // 如果換群組了，加入一個分隔線
-                if (lastGroup !== null && lastGroup !== page.group) {
-                    const separator = document.createElement('div');
-                    separator.className = 'group-separator shrink-0';
-                    dotsContainer.appendChild(separator);
-                }
-                lastGroup = page.group;
+    /* 挑戰照片產生器 */
+    const opts = [["flip", "換手（左右翻轉）"], ["bg", "換背景"], ["far", "拉遠（手變小）"], ["dark", "變暗"]];
+    const tog = {};
+    const chalOut = h("div", { class: "btns", style: "gap:4px" });
+    const chalKind = h("select", { id: "chalKind" }, ...Object.entries(KINDS).map(([k, v]) => h("option", { value: k }, v)));
+    function genChal() {
+      chalOut.innerHTML = "";
+      for (let i = 0; i < 10; i++) chalOut.append(h("span", { html: handSVG(chalKind.value, {
+        size: 64, dx: rand(-4, 4), dy: rand(-4, 4), rot: rand(-8, 8),
+        flip: tog.flip, bg: tog.bg ? ["#f2d7a6", "#c9e7c1", "#e6c9e8"][i % 3] : "#dbe4ee", scale: tog.far ? .6 : 1, dark: tog.dark ? .45 : 0 }) }));
+    }
+    const chalCard = h("div", { class: "card stack" }, h("h3", {}, "挑戰照片產生器"),
+      h("div", { class: "btns" }, h("label", { for: "chalKind" }, "手勢："), chalKind,
+        ...opts.map(([k, l]) => { const cb = h("input", { type: "checkbox", id: "tog-" + k }); cb.onchange = () => { tog[k] = cb.checked; genChal(); };
+          return h("label", { for: "tog-" + k, style: "display:flex;gap:6px;align-items:center;cursor:pointer" }, cb, l); })),
+      h("div", { class: "row" }, h("div", {}, h("p", { class: "small" }, "訓練照片"), thumbs(3, { kind: "rock" })), h("div", { class: "grow" }, h("p", { class: "small" }, "挑戰照片（10 張）"), chalOut)));
+    chalKind.onchange = genChal; genChal();
 
-                const dotWrapper = document.createElement('div');
-                dotWrapper.className = 'relative group cursor-pointer p-1.5 flex items-center shrink-0';
-                dotWrapper.onclick = () => goToPage(index);
-                
-                const dot = document.createElement('div');
-                dot.id = `nav-dot-${index}`;
-                dot.className = `w-2.5 h-2.5 md:w-3.5 md:h-3.5 rounded-full transition-all duration-300 ${groupInfo[page.group].dotInactive}`;
-                
-                const tooltip = document.createElement('div');
-                tooltip.className = 'absolute top-full mt-1 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-sm whitespace-nowrap px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-30 shadow-lg';
-                tooltip.innerHTML = `<strong>${page.label}</strong><br>${page.title}`;
+    const counts = h("div", { class: "note teal" }, "3 種手勢 × 30 張 = ", h("b", {}, "90 張訓練照片"), "　｜　3 種手勢 × 10 張 = ", h("b", {}, "30 張挑戰照片"));
+    sec.append(h("div", { class: "stack" }, compare, burstCard, chalCard, counts,
+      h("p", { class: "small" }, "第一次在 Colab 拍照時，瀏覽器會詢問是否允許使用攝影機，要按「允許」。")));
+    sec.append(think("為什麼挑戰照片要另外拍、而且換條件，不能直接從訓練照片裡抽幾張出來考試？",
+      h("p", {}, "先記住你的猜想，後面「6-5～6-6｜看懂訓練結果」就會揭曉。")));
+  }
+};
 
-                dotWrapper.appendChild(dot);
-                dotWrapper.appendChild(tooltip);
-                dotsContainer.appendChild(dotWrapper);
-            });
+/* ───── 頁 3：照片存在哪裡？ ───── */
+BUILDERS[3] = {
+  build(sec) {
+    const ZH = { rock: "石頭", paper: "布", scissors: "剪刀" };
+    const tree = { name: "content", children: [{ name: "rps", v: "DATA_DIR", children: ["train", "challenge"].map(s => ({ name: s, v: s === "train" ? "TRAIN_DIR" : "CHALLENGE_DIR", children: ["rock", "paper", "scissors"].map(k => ({ name: k, leaf: true, split: s })) })) }] };
+    const pathBox = h("div", { class: "btns", style: "gap:0;font-family:var(--font-mono);font-size:20px" });
+    const pyBox = h("div");
+    const preview = h("div", { class: "btns", style: "gap:4px" });
+    const colors = ["var(--g0)", "var(--teal)", "var(--g2)", "var(--accent)"];
+    function select(chain) {
+      pathBox.innerHTML = "";
+      chain.forEach((n, i) => pathBox.append(h("span", { style: `background:${colors[i]};color:var(--sheet);padding:4px 10px;border-radius:${i ? 0 : 6}px ${i === chain.length - 1 ? 6 : 0}px ${i === chain.length - 1 ? 6 : 0}px ${i ? 0 : 6}px` }, "/" + n.name)));
+      let code = "";
+      const last = chain[chain.length - 1];
+      if (chain.length === 2) code = `DATA_DIR = "/content/rps"`;
+      else if (chain.length === 3) code = `${last.v} = os.path.join(DATA_DIR, "${last.name}")\n# 結果："/content/rps/${last.name}"`;
+      else if (chain.length === 4) code = `os.path.join(${chain[2].v}, "${last.name}")\n# 結果："/content/rps/${chain[2].name}/${last.name}"`;
+      else code = `# /content 是 Colab 雲端電腦上的資料夾`;
+      pyBox.replaceChildren(codeBlock(code));
+      preview.innerHTML = "";
+      if (last.leaf) for (let i = 0; i < 6; i++) preview.append(h("div", { style: "text-align:center" }, h("span", { html: handSVG(last.name, { size: 56, dx: rand(-4, 4), rot: rand(-6, 6), flip: last.split === "challenge" && i % 2, scale: last.split === "challenge" && i % 3 === 0 ? .65 : 1 }) }), h("div", { class: "mono", style: "font-size:12px" }, `${last.split}_00${i}.jpg`)));
+    }
+    function renderNode(n, chain, depth) {
+      const myChain = [...chain, n];
+      const label = h("button", { type: "button", class: "map-item", style: `padding-left:${depth * 22 + 6}px;width:100%` },
+        h("span", {}, n.leaf ? "📂" : "📁"), h("span", { class: "mono", style: "color:var(--ink);font-size:18px" }, n.name),
+        n.v ? h("span", { class: "small mono" }, "← " + n.v) : null, n.leaf ? h("span", { class: "small" }, ZH[n.name]) : null);
+      const box = h("div", {}, label);
+      const kids = h("div", {});
+      if (n.children) n.children.forEach(c => kids.append(renderNode(c, myChain, depth + 1)));
+      box.append(kids);
+      label.onclick = () => { if (n.children) kids.hidden = !kids.hidden; select(myChain); };
+      return box;
+    }
+    const treeBox = h("div", { class: "card", style: "padding:10px" }, renderNode(tree, [], 0));
+    const tabA = h("div", { class: "row" }, h("div", { class: "grow", style: "max-width:460px" }, h("p", { class: "small" }, "點資料夾可以展開或收合："), treeBox),
+      h("div", { class: "grow stack" }, h("h3", {}, "路徑拼拼看"), pathBox, pyBox, preview,
+        h("p", { class: "small" }, "os.path.join 就是用「/」把路徑一段一段接起來。DATA_DIR、TRAIN_DIR、CHALLENGE_DIR 是第 1 節設定好的變數，代表其中幾段。")));
+    select([tree, tree.children[0], tree.children[0].children[0], tree.children[0].children[0].children[0]]);
 
-            updateUI();
-        }
+    /* 在 Colab 哪裡看 */
+    const tabB = h("div", { class: "row" },
+      h("div", { class: "card", style: "display:flex;gap:0;padding:0;overflow:hidden;max-width:520px;flex:1 1 320px" },
+        h("div", { style: "background:var(--code-bg);padding:12px 8px;display:flex;flex-direction:column;gap:14px;font-size:22px;border-right:1px solid var(--line)" },
+          h("span", { title: "目錄" }, "☰"), h("span", { title: "搜尋" }, "🔍"), h("span", { title: "{x}" }, "{x}"),
+          h("span", { style: "outline:3px solid var(--accent);border-radius:6px;padding:0 2px", title: "檔案" }, "📁")),
+        h("div", { style: "padding:12px 16px;font-family:var(--font-mono);font-size:17px;line-height:1.9" },
+          h("div", { style: "font-family:var(--font-body);font-weight:700" }, "檔案"), "📁 ..", h("br"), "📁 content", h("br"), "　📁 rps", h("br"), "　　📁 train", h("br"), "　　📁 challenge", h("br"), "　📁 sample_data")),
+      h("div", { class: "grow stack" },
+        h("p", {}, "點 Colab 畫面", h("b", {}, "最左側的 📁「檔案」"), "圖示，依序點開 content → rps，就能看到照片。點兩下照片可以預覽。"),
+        h("div", { class: "note" }, h("b", {}, "⚠️ 雲端電腦會被回收！"), h("p", {}, "照片存在 Colab 的雲端電腦，不是你的電腦，也不是你的雲端硬碟。斷線或關掉分頁一段時間後，照片就會消失。下課前請用「2-6 備份」下載。"))));
 
-        function updateUI() {
-            // 切換頁面顯示
-            document.querySelectorAll('.page').forEach((p, idx) => {
-                if (idx === currentPage) {
-                    p.classList.add('active');
-                } else {
-                    p.classList.remove('active');
-                }
-            });
+    /* 註解是什麼 */
+    const lines = [["# 這是一行說明文字", true], ["print(\"我會被執行\")", false], ["print(\"我也會被執行\")", false]];
+    const out = h("pre", { class: "code", style: "min-height:3em" });
+    const lineEls = lines.map((l, i) => {
+      const hash = h("button", { type: "button", class: "btn", style: "padding:0 10px;font-family:var(--font-mono)" }, "#");
+      const txt = h("code", { style: "font-size:20px" });
+      let commented = l[1];
+      const draw = () => {
+        const body = l[0].replace(/^# /, "");
+        txt.textContent = (commented ? "# " : "") + body;
+        txt.style.color = commented ? "var(--muted)" : "var(--ink)";
+        hash.setAttribute("aria-pressed", commented); hash.style.background = commented ? "var(--accent-soft)" : "var(--sheet)";
+        runIt();
+      };
+      hash.onclick = () => { commented = !commented; draw(); };
+      return { el: h("div", { class: "row", style: "align-items:center;gap:12px" }, hash, txt), draw, get commented() { return commented; }, l };
+    });
+    function runIt() {
+      const outs = lineEls.filter(x => !x.commented && x.l[0].startsWith("print")).map(x => x.l[0].match(/"(.*)"/)[1]);
+      const bad = lineEls.some(x => !x.commented && x.l[0].startsWith("#"));
+      out.textContent = bad ? "SyntaxError（第一行的說明文字不是程式，不能執行）" : outs.join("\n") || "（什麼都沒有印出）";
+      out.style.color = bad ? "var(--bad)" : "var(--ink)";
+    }
+    const tabC = h("div", { class: "stack" },
+      h("p", {}, "一行程式前面加上 ", h("code", {}, "#"), "，Python 就會略過它，這叫「註解」。拿掉 #，叫做「取消註解」，那一行就會恢復執行。點每行左邊的 # 按鈕切換看看："),
+      h("div", { class: "card stack" }, ...lineEls.map(x => x.el)), h("p", { class: "small" }, "執行結果："), out);
+    lineEls.forEach(x => x.draw());
 
-            // 底部導航狀態
-            document.getElementById('btn-prev').disabled = currentPage === 0;
-            document.getElementById('btn-next').disabled = currentPage === totalPages - 1;
-            document.getElementById('page-indicator').textContent = `${currentPage + 1} / ${totalPages}`;
-            
-            const currPageData = pageData[currentPage];
-            document.getElementById('page-title-indicator').textContent = currPageData.label === 'Cover' ? currPageData.title : `${currPageData.label}｜${currPageData.title}`;
-
-            // 進度條顏色與長度更新
-            const progressBar = document.getElementById('progress-bar');
-            const progressPercentage = (currentPage / (totalPages - 1)) * 100;
-            progressBar.style.width = `${progressPercentage}%`;
-            
-            // 清除並套用目前的群組顏色
-            progressBar.className = `h-full transition-all duration-500 w-0 ${groupInfo[currPageData.group].color}`;
-            
-            // 下一步按鈕的顏色根據目前群組變更 (提升細節感)
-            const btnNext = document.getElementById('btn-next');
-            btnNext.className = `px-4 md:px-6 py-3 rounded-xl font-bold text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center gap-2 shadow-sm ${groupInfo[currPageData.group].color} ${groupInfo[currPageData.group].hover}`;
-
-            // 圓點狀態更新
-            pageData.forEach((page, index) => {
-                const dot = document.getElementById(`nav-dot-${index}`);
-                const activeClasses = groupInfo[page.group].dotActive.split(' ');
-                
-                // 重設圓點樣式
-                dot.className = `w-2.5 h-2.5 md:w-3.5 md:h-3.5 rounded-full transition-all duration-300`;
-                
-                if (index === currentPage) {
-                    dot.classList.add(...activeClasses, 'scale-150', 'ring-4');
-                } else if (index < currentPage) {
-                    dot.classList.add(groupInfo[page.group].color);
-                    dot.classList.add('opacity-50');
-                } else {
-                    dot.classList.add(groupInfo[page.group].dotInactive);
-                }
-            });
-
-            document.querySelector('main').scrollTo(0, 0);
-            
-            // 讓上方的選單自動滾動到目前的位置，避免圓點超出畫面外
-            const dotsContainer = document.getElementById('top-nav-dots');
-            const activeDot = document.getElementById(`nav-dot-${currentPage}`);
-            if(activeDot) {
-                dotsContainer.scrollTo({
-                    left: activeDot.parentElement.offsetLeft - dotsContainer.offsetWidth / 2,
-                    behavior: 'smooth'
-                });
-            }
-        }
-
-        function goToPage(index) {
-            if (index < 0 || index >= totalPages || index === currentPage) return;
-            if (pageHooks.onLeave[currentPage]) pageHooks.onLeave[currentPage]();
-            currentPage = index;
-            if (pageHooks.onEnter[currentPage]) pageHooks.onEnter[currentPage]();
-            updateUI();
-        }
-
-        function changePage(step) {
-            goToPage(currentPage + step);
-        }
-
-        // 顯示答案 (TODO、挑戰用)
-        function toggleAnswer(idx) {
-            const box = document.getElementById(`ans-box-${idx}`);
-            const btn = document.getElementById(`btn-ans-${idx}`);
-            if (!box || !btn) return;
-            
-            if (box.classList.contains('hidden')) {
-                box.classList.remove('hidden');
-                btn.textContent = '隱藏解答';
-                btn.classList.replace('bg-slate-800', 'bg-rose-600');
-                btn.classList.replace('hover:bg-slate-700', 'hover:bg-rose-700');
-                Prism.highlightAllUnder(box);
-            } else {
-                box.classList.add('hidden');
-                btn.textContent = btn.id.includes('ans-5') || btn.id.includes('ans-14') ? '顯示解答' : '顯示答案';
-                btn.classList.replace('bg-rose-600', 'bg-slate-800');
-                btn.classList.replace('hover:bg-rose-700', 'hover:bg-slate-700');
-            }
-        }
-
-        // 顯示提示 (一般章節想一想用)
-        function toggleHint(idx) {
-            const box = document.getElementById(`hint-box-${idx}`);
-            const btn = document.getElementById(`btn-hint-${idx}`);
-            if (!box || !btn) return;
-
-            if (box.classList.contains('hidden')) {
-                box.classList.remove('hidden');
-                btn.textContent = '隱藏提示';
-                btn.classList.replace('bg-slate-200', 'bg-amber-100');
-                btn.classList.replace('text-slate-700', 'text-amber-800');
-            } else {
-                box.classList.add('hidden');
-                btn.textContent = '想一想';
-                btn.classList.replace('bg-amber-100', 'bg-slate-200');
-                btn.classList.replace('text-amber-800', 'text-slate-700');
-            }
-        }
-
-        // 鍵盤支援
-        window.addEventListener('keydown', (e) => {
-            const activeTag = document.activeElement.tagName.toLowerCase();
-            const isInput = activeTag === 'input' || activeTag === 'textarea' || document.activeElement.isContentEditable;
-            if (isInput) return;
-
-            if (e.key === 'ArrowRight') changePage(1);
-            else if (e.key === 'ArrowLeft') changePage(-1);
+    /* 刪除重拍 */
+    const splitSel = h("select", { id: "delSplit" }, h("option", { value: "TRAIN_DIR" }, "訓練照片"), h("option", { value: "CHALLENGE_DIR" }, "挑戰照片"));
+    const kindSel = h("select", { id: "delKind" }, ...Object.entries(ZH).map(([k, v]) => h("option", { value: k }, v)));
+    const codeBox = h("div");
+    const mini = h("div", { class: "card mono", style: "font-size:17px;line-height:1.9" });
+    const warn = h("div", { class: "note", hidden: "" });
+    const deleted = new Set();
+    const drawMini = () => {
+      mini.innerHTML = "";
+      ["train", "challenge"].forEach(s => {
+        mini.append(h("div", {}, "📁 " + s));
+        ["rock", "paper", "scissors"].forEach(k => {
+          const key = s + "/" + k;
+          mini.append(h("div", { style: `padding-left:1.6em;transition:opacity .6s;${deleted.has(key) ? "opacity:.15;text-decoration:line-through" : ""}` }, "📂 " + k + (deleted.has(key) ? "（已刪除）" : "（30 張）")));
         });
+      });
+    };
+    const drawCode = () => codeBox.replaceChildren(codeBlock(`shutil.rmtree(os.path.join(${splitSel.value}, "${kindSel.value}"))`));
+    splitSel.onchange = kindSel.onchange = drawCode;
+    const tabD = h("div", { class: "row" },
+      h("div", { class: "grow stack" },
+        h("div", { class: "btns" }, h("label", { for: "delSplit" }, "刪除："), splitSel, h("label", { for: "delKind" }, "手勢："), kindSel),
+        h("p", { class: "small" }, "在 Colab 裡，把對應那一行的 # 拿掉，就是這行程式："), codeBox,
+        h("div", { class: "btns" },
+          h("button", { class: "btn primary", type: "button", onclick: () => {
+            deleted.add((splitSel.value === "TRAIN_DIR" ? "train" : "challenge") + "/" + kindSel.value); drawMini();
+            warn.hidden = false;
+            warn.innerHTML = "<b>⚠️ shutil.rmtree 會直接刪除整個資料夾，沒有資源回收筒！</b><br>刪完再回到 2-1 或 2-2 重拍。用完記得把 # 加回去，免得之後「全部執行」時又刪掉一次。";
+          } }, "▶ 執行"),
+          h("button", { class: "btn", type: "button", onclick: () => { deleted.clear(); drawMini(); warn.hidden = true; } }, "復原示範")),
+        warn, h("p", { class: "small" }, "「復原示範」只是讓這個網頁重來。真實的 Colab 刪掉就救不回來。")),
+      h("div", { style: "flex:0 1 320px" }, mini));
+    drawCode(); drawMini();
 
-        // 啟動
-        initUI();
-    </script>
+    sec.append(makeTabs([
+      { label: "資料夾與路徑", content: tabA }, { label: "在 Colab 哪裡看", content: tabB },
+      { label: "註解是什麼", content: tabC }, { label: "刪除重拍", content: tabD }
+    ]));
+  }
+};
+
+</script>
+<script>
+/* ───── 頁 4：TODO 1 影像就是數字 ───── */
+BUILDERS[4] = {
+  build(sec) {
+    const S = 12;
+    // 產生一張 12×12 的「石頭」小圖：淺灰藍背景＋膚色拳頭
+    const img = [];
+    for (let i = 0; i < S; i++) { img.push([]); for (let j = 0; j < S; j++) {
+      const dy = (i - 6.2) / 4.3, dx = (j - 5.8) / 3.9, d = dx * dx + dy * dy;
+      let px;
+      if (i >= 10 && j >= 4 && j <= 7) px = [222, 176, 146];               // 手腕
+      else if (d < 1) { const s = Math.round(18 * d); px = [231 - s, 186 - s, 152 - s]; if (i === 5 && j > 2 && j < 9) px = [196, 140, 110]; }
+      else px = [214 + ((i + j) % 2), 222, 232];
+      img[i].push(px);
+    } }
+    let mode = "all";
+    const gridEl = h("div", { class: "grid", style: `grid-template-columns:repeat(${S},var(--cs));--cs:40px;--cf:13px` });
+    const cells = [];
+    for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
+      const c = h("div", { class: "cell", "data-i": i, "data-j": j });
+      c.addEventListener("mouseenter", () => showPx(i, j)); c.addEventListener("click", () => showPx(i, j));
+      cells.push(c); gridEl.append(c);
+    }
+    const info = h("div", { class: "card", style: "min-width:220px" }, h("p", { class: "small" }, "把滑鼠移到格子上"));
+    function showPx(i, j) {
+      const [r, g, b] = img[i][j];
+      info.innerHTML = `<p class="mono" style="font-size:20px">列 i = ${i}，行 j = ${j}</p>
+        <p class="mono" style="font-size:22px"><span style="color:#d6336c">R ${r}</span>　<span style="color:#2b8a3e">G ${g}</span>　<span style="color:#1c7ed6">B ${b}</span></p>
+        <p class="small mono">img[${i}][${j}][0] = ${r}</p>`;
+    }
+    function paint(sel) {
+      cells.forEach(c => {
+        const i = +c.dataset.i, j = +c.dataset.j, [r, g, b] = img[i][j];
+        const ch = { R: 0, G: 1, B: 2 }[mode];
+        if (mode === "all") { c.style.background = `rgb(${r},${g},${b})`; c.textContent = ""; c.style.color = ""; }
+        else { const v = img[i][j][ch]; const tint = ["rgba(214,51,108,", "rgba(43,138,62,", "rgba(28,126,214,"][ch];
+          c.style.background = tint + (v / 255).toFixed(2) + ")"; c.textContent = v; c.style.color = v > 150 ? "#fff" : "var(--ink)"; }
+        c.classList.toggle("sel", !!(sel && i >= sel.r0 && i < sel.r1 && j >= sel.c0 && j < sel.c1));
+      });
+    }
+    const modeBtns = h("div", { class: "btns" }, ...[["all", "全彩"], ["R", "R 紅"], ["G", "G 綠"], ["B", "B 藍"]].map(([m, l]) =>
+      h("button", { class: "btn", type: "button", "aria-pressed": m === "all", onclick: e => { mode = m; $$("button", modeBtns).forEach(b => b.setAttribute("aria-pressed", b === e.target)); upd(); } }, l)));
+    const intro = h("div", { class: "row" },
+      h("div", { class: "scroll-x" }, gridEl),
+      h("div", { class: "grow stack" }, info, modeBtns,
+        h("p", {}, "切到 R、G、B 試試看：一張彩色圖，其實是", h("b", {}, "三張疊在一起的數字表"), "，每個數字 0～255。"),
+        h("div", { class: "note teal stack", style: "gap:6px" },
+          h("p", {}, h("b", {}, "形狀 shape = (高, 寬, 色彩) = (12, 12, 3)")),
+          h("p", {}, "C++：", h("code", {}, "unsigned char img[12][12][3];")),
+          h("p", {}, "取第 i 列、第 j 行的紅色：C++ ", h("code", {}, "img[i][j][0]"), "，Python ", h("code", {}, "arr[i, j, 0]")),
+          h("p", { class: "small" }, "Colab 裡的照片是 256×256，所以 shape 是 (256, 256, 3)。"))));
+
+    /* 切片遊樂場 */
+    const num = (id, v, max) => h("input", { type: "number", id, value: v, min: 0, max, style: "width:4.2em;font-family:var(--font-mono);padding:4px" });
+    const r0 = num("r0", 2, S), r1 = num("r1", 6, S), c0 = num("c0", 0, S), c1 = num("c1", 4, S);
+    const chSel = h("select", { id: "chSel" }, h("option", { value: 0 }, "0 = R"), h("option", { value: 1 }, "1 = G"), h("option", { value: 2 }, "2 = B"));
+    const pyOut = h("div"), cppOut = h("div"), table = h("div", { class: "scroll-x" }), verdict = h("p", { "aria-live": "polite" });
+    function upd() {
+      const s = { r0: +r0.value, r1: +r1.value, c0: +c0.value, c1: +c1.value, ch: +chSel.value };
+      paint(s);
+      const showS = v => (v === 0 ? "" : v);
+      pyOut.replaceChildren(codeBlock(`corner = arr[${showS(s.r0)}:${s.r1}, ${showS(s.c0)}:${s.c1}, ${s.ch}]`));
+      cppOut.replaceChildren(codeBlock(`for (int i = ${s.r0}; i < ${s.r1}; i++)\n    for (int j = ${s.c0}; j < ${s.c1}; j++)\n        corner[i - ${s.r0}][j - ${s.c0}] = img[i][j][${s.ch}];`, "cpp"));
+      const rows = [];
+      for (let i = s.r0; i < s.r1; i++) rows.push(h("tr", {}, ...Array.from({ length: Math.max(0, s.c1 - s.c0) }, (_, k) => h("td", { class: "mono", style: "border:1px solid var(--line);padding:4px 10px;text-align:right" }, img[i][s.c0 + k][s.ch]))));
+      table.replaceChildren(rows.length && s.c1 > s.c0 ? h("table", { style: "border-collapse:collapse" }, h("tbody", {}, ...rows)) : h("p", { class: "small" }, "（範圍是空的：起點要小於終點）"));
+      const okAns = s.r0 === 0 && s.r1 === 4 && s.c0 === 0 && s.c1 === 4 && s.ch === 0;
+      verdict.innerHTML = okAns ? "<span class='ok'>✅ 正確！這就是 TODO 1 要的「左上角 4×4 的紅色通道」。</span>" : "小挑戰：調整成「左上角 4×4 的紅色通道」。";
+    }
+    [r0, r1, c0, c1, chSel].forEach(x => x.addEventListener("input", upd));
+    const play = h("div", { class: "card stack" }, h("h3", {}, "切片遊樂場"),
+      h("div", { class: "btns" }, h("span", {}, "列 "), h("label", { for: "r0", class: "small" }, "起"), r0, h("span", {}, ":"), h("label", { for: "r1", class: "small" }, "終"), r1,
+        h("span", { style: "margin-left:14px" }, "行 "), h("label", { for: "c0", class: "small" }, "起"), c0, h("span", {}, ":"), h("label", { for: "c1", class: "small" }, "終"), c1,
+        h("label", { for: "chSel", style: "margin-left:14px" }, "通道 "), chSel),
+      h("div", { class: "note" }, h("b", {}, "終點不包含在內："), "0:4 代表 0、1、2、3 共 4 個。起點是 0 時可以省略，寫成 :4。"),
+      h("div", { class: "row" }, h("div", { class: "grow stack" }, h("p", { class: "small" }, "Python"), pyOut, h("p", { class: "small" }, "等效的 C++"), cppOut),
+        h("div", { class: "grow stack" }, h("p", { class: "small" }, "取出來的數值（框起來的格子）"), table)), verdict);
+    const torch = h("div", { class: "note teal" }, h("b", {}, "補充："), "PyTorch 會把形狀改成 (色彩, 高, 寬)，也就是 (3, 256, 256)，並把 0～255 縮放成 0～1。只是排列和單位不同，資料是同一份。");
+    sec.append(h("div", { class: "stack" }, intro, play, torch));
+    upd();
+  }
+};
+
+/* ───── 頁 5：卷積是什麼？ ───── */
+BUILDERS[5] = {
+  build(sec) {
+    const COLORS9 = ["#ffd8a8", "#ffec99", "#d8f5a2", "#b2f2bb", "#99e9f2", "#a5d8ff", "#d0bfff", "#fcc2d7", "#ffc9c9"];
+    const KERNELS = {
+      v: { name: "垂直邊緣", k: [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]] },
+      hz: { name: "水平邊緣", k: [[-1, -2, -1], [0, 0, 0], [1, 2, 1]] },
+      blur: { name: "模糊", k: [[1 / 9, 1 / 9, 1 / 9], [1 / 9, 1 / 9, 1 / 9], [1 / 9, 1 / 9, 1 / 9]] }
+    };
+    const fmtK = v => (Math.abs(v - 1 / 9) < 1e-9 ? "1/9" : String(v));
+    const fmtN = v => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+    const conv = (A, K, i, j) => { let s = 0; for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) s += A[i + a][j + b] * K[a][b]; return s; };
+
+    /* ① 分解動畫 */
+    const A = Array.from({ length: 6 }, () => [0, 0, 0, 9, 9, 9]);
+    const K = KERNELS.v.k;
+    const OUT = 4;
+    let step = -1;           // 0..63：位置 = floor(step/4)，小步驟 = step%4
+    const mkGrid = (n, cs) => { const g = h("div", { class: "grid", style: `grid-template-columns:repeat(${n},var(--cs));--cs:${cs}px;--cf:${Math.round(cs * .42)}px` });
+      const cs_ = []; for (let i = 0; i < n * n; i++) { const c = h("div", { class: "cell" }); cs_.push(c); g.append(c); } return { g, cs: cs_ }; };
+    const gIn = mkGrid(6, 48), gK = mkGrid(3, 48), gWin = mkGrid(3, 48), gProd = mkGrid(3, 48), gOut = mkGrid(4, 48);
+    gK.cs.forEach((c, idx) => { c.textContent = K[Math.floor(idx / 3)][idx % 3]; c.style.background = COLORS9[idx]; c.style.color = "#16202e"; c.style.fontWeight = "700"; });
+    const eq = h("div", { class: "mono", style: "font-size:19px;min-height:3.4em;line-height:1.7" });
+    const say = h("p", { class: "note", "aria-live": "polite" });
+    const label = (t, el) => h("div", { class: "stack", style: "gap:6px;align-items:center" }, h("span", { class: "small" }, t), el);
+    const sym = t => h("span", { style: "font-size:30px;font-weight:900;align-self:center;color:var(--muted)" }, t);
+    function render() {
+      const pos = step < 0 ? -1 : Math.floor(step / 4), sub = step < 0 ? -1 : step % 4;
+      const pi = pos < 0 ? -1 : Math.floor(pos / OUT), pj = pos < 0 ? -1 : pos % OUT;
+      gIn.cs.forEach((c, idx) => {
+        const i = Math.floor(idx / 6), j = idx % 6, v = A[i][j];
+        c.textContent = v; c.style.background = `rgb(${255 - v * 22},${255 - v * 22},${255 - v * 22})`; c.style.color = v > 5 ? "#fff" : "#16202e";
+        const inWin = pos >= 0 && i >= pi && i < pi + 3 && j >= pj && j < pj + 3;
+        c.classList.toggle("sel", inWin);
+        if (inWin && sub >= 1) { c.style.background = COLORS9[(i - pi) * 3 + (j - pj)]; c.style.color = "#16202e"; }
+      });
+      gWin.cs.forEach((c, idx) => { const a = Math.floor(idx / 3), b = idx % 3;
+        if (pos >= 0 && sub >= 1) { c.textContent = A[pi + a][pj + b]; c.style.background = COLORS9[idx]; c.style.color = "#16202e"; } else { c.textContent = ""; c.style.background = "var(--line)"; } });
+      gProd.cs.forEach((c, idx) => { const a = Math.floor(idx / 3), b = idx % 3;
+        if (pos >= 0 && sub >= 1) { c.textContent = A[pi + a][pj + b] * K[a][b]; c.style.background = COLORS9[idx]; c.style.color = "#16202e"; } else { c.textContent = ""; c.style.background = "var(--line)"; } });
+      gOut.cs.forEach((c, idx) => {
+        const oi = Math.floor(idx / OUT), oj = idx % OUT;
+        const filled = idx < pos || (idx === pos && sub >= 3);
+        const v = conv(A, K, oi, oj);
+        c.textContent = filled ? v : ""; c.style.background = !filled ? "var(--line)" : v === 0 ? "var(--sheet)" : `rgba(217,72,15,${Math.min(1, .25 + Math.abs(v) / 48)})`;
+        c.style.boxShadow = filled ? "inset 0 0 0 1px var(--line)" : "";
+        c.style.color = filled && Math.abs(v) > 18 ? "#fff" : "var(--ink)";
+        c.classList.toggle("sel", idx === pos);
+      });
+      if (pos < 0) { eq.textContent = ""; say.innerHTML = "按「下一步」開始。卷積核會從左上角開始，<b>一格一格</b>往右、往下移動。"; }
+      else {
+        const prods = []; let s = 0;
+        for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) { prods.push(`${A[pi + a][pj + b]}×(${K[a][b]})`); s += A[pi + a][pj + b] * K[a][b]; }
+        const msgs = [
+          `① 框選：卷積核蓋在第 ${pi} 列、第 ${pj} 行開始的 3×3 區域（橘色框）。`,
+          "② 對應相乘：同顏色的格子，輸入的數字 × 卷積核的數字。",
+          `③ 加總：9 個乘積全部加起來，等於 <b>${s}</b>。`,
+          `④ 寫入：把 ${s} 寫進輸出特徵圖的第 ${pi} 列、第 ${pj} 行。`
+        ];
+        say.innerHTML = `位置 ${pos + 1} / 16　｜　` + msgs[sub];
+        eq.innerHTML = sub >= 1 ? prods.map((p, k) => `<span style="background:${COLORS9[k]};color:#16202e;padding:0 4px;border-radius:3px">${p}</span>`).join(" + ") + (sub >= 2 ? ` = <b style="color:var(--accent)">${s}</b>` : "") : "";
+      }
+      prevB.disabled = step < 0; nextB.disabled = step >= 63;
+    }
+    const prevB = h("button", { class: "btn", type: "button", onclick: () => { step = Math.max(-1, step - 1); render(); } }, "◀ 上一步");
+    const nextB = h("button", { class: "btn primary", type: "button", onclick: () => { step = Math.min(63, step + 1); render(); } }, "下一步 ▶");
+    const speed = h("input", { type: "range", id: "convSpeed", min: 150, max: 1500, value: 700, step: 50 });
+    let playing = null;
+    const playB = h("button", { class: "btn", type: "button" }, "▶ 自動播放");
+    playB.onclick = () => {
+      if (playing) { clearTimeout(playing); playing = null; playB.textContent = "▶ 自動播放"; return; }
+      playB.textContent = "⏸ 暫停";
+      const tick = () => { if (step >= 63) { playing = null; playB.textContent = "▶ 自動播放"; return; } step++; render(); playing = Timers.timeout(tick, 1650 - speed.value); };
+      tick();
+    };
+    const resetB = h("button", { class: "btn", type: "button", onclick: () => { step = -1; render(); } }, "↺ 重來");
+    // 拖曳／點選卷積核位置
+    let dragging = false;
+    const placeAt = idx => { const i = Math.min(3, Math.floor(idx / 6)), j = Math.min(3, idx % 6); step = (i * OUT + j) * 4 + 3; render(); };
+    gIn.cs.forEach((c, idx) => {
+      c.style.cursor = "grab";
+      c.addEventListener("pointerdown", e => { dragging = true; placeAt(idx); e.preventDefault(); });
+      c.addEventListener("pointerenter", () => dragging && placeAt(idx));
+    });
+    document.addEventListener("pointerup", () => (dragging = false));
+    gOut.cs.forEach((c, idx) => { c.style.cursor = "pointer"; c.addEventListener("click", () => { step = idx * 4 + 3; render(); }); });
+
+    const tab1 = h("div", { class: "stack" },
+      h("div", { class: "scroll-x" }, h("div", { class: "row", style: "flex-wrap:nowrap;gap:14px;align-items:center;width:max-content" },
+        label("輸入（6×6 灰階）", gIn.g), sym("→"), label("框選的 3×3", gWin.g), sym("×"), label("卷積核（找垂直邊緣）", gK.g), sym("="), label("相乘結果", gProd.g), sym("→"), label("輸出特徵圖（4×4）", gOut.g))),
+      eq, say,
+      h("div", { class: "btns" }, prevB, nextB, playB, h("label", { for: "convSpeed", class: "small" }, "速度"), speed, resetB),
+      h("p", { class: "small" }, "也可以直接在左邊的輸入上", h("b", {}, "拖曳"), "，卷積核會跟著移動；點輸出特徵圖的格子，會跳到算出那一格的位置。"),
+      h("div", { class: "note teal" }, "觀察：左邊 0、右邊 9 的交界處（垂直邊緣），輸出的數字特別大；其他地方都是 0。這個卷積核就是專門「找垂直邊緣」的。"));
+
+    /* ② 換你算算看 */
+    const practiceA = [[1, 2, 0, 3], [4, 0, 5, 1], [2, 3, 1, 0], [0, 1, 4, 2]].map(r => r.slice());
+    let pK = KERNELS.v.k, pPos = [0, 0];
+    const pGrid = mkGrid(4, 50), pKgrid = mkGrid(3, 50);
+    const prodInputs = Array.from({ length: 9 }, (_, k) => h("input", { type: "number", id: "pp" + k, style: "width:4.2em;font-family:var(--font-mono);padding:4px", "aria-label": "第 " + (k + 1) + " 個乘積" }));
+    const sumInput = h("input", { type: "number", id: "ppSum", style: "width:5em;font-family:var(--font-mono);padding:4px;font-weight:700" });
+    const pRes = h("p", { "aria-live": "polite" });
+    function newQ() {
+      pPos = [Math.floor(Math.random() * 2), Math.floor(Math.random() * 2)];
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) practiceA[i][j] = Math.floor(Math.random() * 6);
+      pGrid.cs.forEach((c, idx) => { const i = Math.floor(idx / 4), j = idx % 4; c.textContent = practiceA[i][j];
+        const inW = i >= pPos[0] && i < pPos[0] + 3 && j >= pPos[1] && j < pPos[1] + 3;
+        c.style.background = inW ? COLORS9[(i - pPos[0]) * 3 + (j - pPos[1])] : "var(--line)"; c.style.color = "#16202e"; c.classList.toggle("sel", inW); });
+      pKgrid.cs.forEach((c, idx) => { c.textContent = pK[Math.floor(idx / 3)][idx % 3]; c.style.background = COLORS9[idx]; c.style.color = "#16202e"; });
+      prodInputs.forEach(x => { x.value = ""; x.style.outline = ""; }); sumInput.value = ""; sumInput.style.outline = ""; pRes.textContent = "";
+    }
+    function check() {
+      let allOk = true, s = 0;
+      prodInputs.forEach((x, k) => { const a = Math.floor(k / 3), b = k % 3; const want = practiceA[pPos[0] + a][pPos[1] + b] * pK[a][b]; s += want;
+        const ok = x.value !== "" && +x.value === want; x.style.outline = ok ? "3px solid var(--teal)" : "3px solid var(--bad)"; if (!ok) allOk = false; });
+      const sOk = sumInput.value !== "" && +sumInput.value === s; sumInput.style.outline = sOk ? "3px solid var(--teal)" : "3px solid var(--bad)";
+      pRes.innerHTML = allOk && sOk ? "<span class='ok'>✅ 全對！</span>" : `<span class='err'>紅框的地方再算一次。</span>${sOk ? "" : `（提示：總和是 9 個乘積加起來）`}`;
+    }
+    const prodGrid = h("div", { style: "display:grid;grid-template-columns:repeat(3,auto);gap:6px;width:max-content" },
+      ...prodInputs.map((x, k) => h("div", { style: `background:${COLORS9[k]};padding:4px;border-radius:4px` }, x)));
+    const tab2 = h("div", { class: "stack" },
+      h("p", {}, "輸入上有顏色的 3×3 區域就是卷積核蓋住的地方。先算 9 個乘積，再加總。"),
+      h("div", { class: "scroll-x" }, h("div", { class: "row", style: "flex-wrap:nowrap;align-items:center;width:max-content" }, label("輸入", pGrid.g), sym("×"), label("卷積核", pKgrid.g), sym("="), label("9 個乘積（同顏色相乘）", prodGrid), sym("→"), label("總和", sumInput))),
+      h("div", { class: "btns" }, h("button", { class: "btn primary", type: "button", onclick: check }, "檢查"), h("button", { class: "btn", type: "button", onclick: newQ }, "換一題")), pRes);
+    newQ();
+
+    /* ③ 為什麼輸出比較小 */
+    const Hs = h("input", { type: "range", id: "convH", min: 5, max: 10, value: 6 });
+    const ks = h("input", { type: "range", id: "convK", min: 2, max: 5, value: 3 });
+    const sizeBox = h("div"), sizeTxt = h("p", { class: "mono", style: "font-size:22px" });
+    function drawSize() {
+      const H = +Hs.value, k = +ks.value, o = H - k + 1;
+      const g = h("div", { class: "grid", style: `grid-template-columns:repeat(${H},26px)` });
+      for (let i = 0; i < H * H; i++) { const r = Math.floor(i / H), c = i % H;
+        g.append(h("div", { style: `width:26px;height:26px;border-radius:3px;background:${r < k && c < k ? "var(--accent)" : (r < k && c < o + k - 1 && c >= o - 1 ? "var(--accent-soft)" : "var(--line)")}` })); }
+      const outG = h("div", { class: "grid", style: `grid-template-columns:repeat(${o},26px)` }, ...Array.from({ length: o * o }, () => h("div", { style: "width:26px;height:26px;border-radius:3px;background:var(--teal)" })));
+      sizeBox.replaceChildren(h("div", { class: "row", style: "align-items:center" }, label(`輸入 ${H}×${H}（深橘＝卷積核第一個位置，淺橘＝最後一個位置）`, g), sym("→"), label(`輸出 ${o}×${o}`, outG)));
+      sizeTxt.textContent = `輸出邊長 = H − k + 1 = ${H} − ${k} + 1 = ${o}`;
+    }
+    Hs.oninput = ks.oninput = drawSize;
+    const tab3 = h("div", { class: "stack" },
+      h("p", {}, "卷積核不能超出輸入的邊界。3×3 的卷積核在 6 格寬的輸入上，左右只能放 4 個位置，所以輸出是 4×4。"),
+      h("div", { class: "btns" }, h("label", { for: "convH" }, "輸入大小 H"), Hs, h("label", { for: "convK" }, "卷積核大小 k"), ks), sizeTxt, sizeBox);
+    drawSize();
+
+    /* ④ 不同的卷積核 */
+    const P = 16, palm = Array.from({ length: P }, () => Array(P).fill(30));
+    for (let i = 8; i <= 13; i++) for (let j = 3; j <= 13; j++) palm[i][j] = 220;           // 手掌
+    [[3, 3], [6, 1], [9, 1], [12, 3]].forEach(([j, top]) => { for (let i = top; i < 8; i++) { palm[i][j] = 220; palm[i][j + 1] = 220; } }); // 四根手指（寬 2 格）
+    for (let i = 9; i <= 11; i++) { palm[i][14] = 220; palm[i][15] = 220; }                  // 大拇指
+    for (let i = 14; i < P; i++) for (let j = 6; j <= 10; j++) palm[i][j] = 220;              // 手腕
+    const cIn = h("canvas", { width: 320, height: 320, style: "width:100%;max-width:300px;image-rendering:pixelated;border-radius:6px" });
+    const cOut = h("canvas", { width: 280, height: 280, style: "width:100%;max-width:300px;image-rendering:pixelated;border-radius:6px" });
+    const drawGray = (cv, M, n, cell, norm) => { const ctx = cv.getContext("2d"); ctx.clearRect(0, 0, cv.width, cv.height);
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const v = M[i] && M[i][j] != null ? Math.round(norm(M[i][j])) : null;
+        ctx.fillStyle = v == null ? "#888" : `rgb(${v},${v},${v})`; ctx.fillRect(j * cell, i * cell, cell - 1, cell - 1); } };
+    drawGray(cIn, palm, P, 20, v => v);
+    let kKey = "v";
+    const kShow = mkGrid(3, 46);
+    function sweep() {
+      Timers.clear();
+      const KK = KERNELS[kKey].k;
+      kShow.cs.forEach((c, idx) => { c.textContent = fmtK(KK[Math.floor(idx / 3)][idx % 3]); c.style.background = "var(--accent-soft)"; });
+      const o = P - 2, res = Array.from({ length: o }, () => Array(o).fill(null));
+      let max = 1; for (let i = 0; i < o; i++) for (let j = 0; j < o; j++) max = Math.max(max, Math.abs(conv(palm, KK, i, j)));
+      let n = 0;
+      Timers.interval(() => {
+        if (n >= o * o) return;
+        for (let t = 0; t < 4 && n < o * o; t++, n++) { const i = Math.floor(n / o), j = n % o; res[i][j] = conv(palm, KK, i, j); }
+        drawGray(cOut, res, o, 20, v => kKey === "blur" ? v : Math.abs(v) / max * 255);
+      }, 40);
+    }
+    const kBtns = h("div", { class: "btns" }, ...Object.entries(KERNELS).map(([key, kk]) =>
+      h("button", { class: "btn", type: "button", "aria-pressed": key === "v", onclick: e => { kKey = key; $$("button", kBtns).forEach(b => b.setAttribute("aria-pressed", b === e.target)); sweep(); } }, kk.name)));
+    const tab4 = h("div", { class: "stack" },
+      h("p", {}, "換成一張 16×16 的手掌圖。選一個卷積核，看它掃過整張圖後找到什麼："), kBtns,
+      h("div", { class: "row", style: "align-items:center" }, label("輸入：手掌（布）", cIn), sym("×"), label("卷積核", kShow.g), sym("→"), label("輸出特徵圖（越亮＝數值越大）", cOut)),
+      h("div", { class: "note teal" }, h("b", {}, "垂直邊緣"), "讓手指的左右兩側變亮；", h("b", {}, "水平邊緣"), "讓指尖、手掌上緣和手腕變亮；", h("b", {}, "模糊"), "讓圖變得比較柔和。不同的卷積核，找出不同的特徵。"),
+      h("div", { class: "note" }, h("b", {}, "跟卷積神經網路的關係："), "神經網路裡有很多這樣的卷積核，裡面的數字", h("b", {}, "不是人設定的，而是訓練時自己學出來的"), "。前面的層學會找邊緣，後面的層把邊緣組合成手指、手掌等形狀。所以「凍結」時，可以直接沿用別人訓練好的前面幾層。"));
+
+    /* ⑤ 延伸挑戰 A */
+    const iSel = h("select", { id: "loopI" }, ...[0, 1, 2, 3].map(v => h("option", { value: v }, v)));
+    const jSel = h("select", { id: "loopJ" }, ...[0, 1, 2, 3].map(v => h("option", { value: v }, v)));
+    const jump = () => { step = (+iSel.value * OUT + +jSel.value) * 4 + 3; render(); loopNote.innerHTML = `i = ${iSel.value}、j = ${jSel.value} 時，卷積核蓋住第 ${iSel.value}～${+iSel.value + 2} 列、第 ${jSel.value}～${+jSel.value + 2} 行，算出 out[${iSel.value}, ${jSel.value}] = <b>${conv(A, K, +iSel.value, +jSel.value)}</b>。切到「① 一格怎麼算」分頁，可以看到同一個位置。`; };
+    iSel.onchange = jSel.onchange = jump;
+    const loopNote = h("p", { class: "note teal" });
+    const tab5 = h("div", { class: "stack" },
+      h("p", { class: "chip bonus", style: "align-self:flex-start" }, "★ 加分題，與挑戰 C 任選一題"),
+      h("p", {}, "Colab「3-2」要你完成 my_conv2d：用 for 迴圈把輸出 out 填滿。先看 C++ 怎麼寫："),
+      codeBlock(`for (int i = 0; i < H - k + 1; i++)\n  for (int j = 0; j < W - k + 1; j++) {\n    float s = 0;\n    for (int a = 0; a < k; a++)          // 卷積核的列\n      for (int b = 0; b < k; b++)        // 卷積核的行\n        s += img[i + a][j + b] * kernel[a][b];   // ② 對應相乘\n    out[i][j] = s;                       // ③ 加總後 ④ 寫入\n  }`, "cpp"),
+      h("p", {}, "Python 可以用", h("b", {}, "切片"), "一次取出 3×3 區域，所以只要兩層迴圈：", h("code", {}, "img2d[i:i+k, j:j+k] * kernel"), " 是對應位置相乘（步驟 ②），", h("code", {}, "np.sum(...)"), " 是加總（步驟 ③）。"),
+      h("div", { class: "btns" }, h("span", {}, "試試看迴圈變數："), h("label", { for: "loopI" }, "i ="), iSel, h("label", { for: "loopJ" }, "j ="), jSel), loopNote,
+      h("p", { class: "small" }, "小補充：深度學習裡的「卷積」不會把卷積核翻轉，數學上叫「互相關（cross-correlation）」，所以直接相乘加總就對了。"),
+      answer(codeBlock("for i in range(H - k + 1):\n    for j in range(W - k + 1):\n        out[i, j] = np.sum(img2d[i:i + k, j:j + k] * kernel)")));
+
+    sec.append(makeTabs([
+      { label: "① 一格怎麼算", content: tab1 }, { label: "② 換你算算看", content: tab2 },
+      { label: "③ 輸出為什麼變小", content: tab3 }, { label: "④ 不同卷積核找不同特徵", content: tab4, onShow: sweep },
+      { label: "⑤ ★ 延伸挑戰 A", content: tab5, onShow: jump }
+    ]));
+    render();
+    this._stop = () => { if (playing) { clearTimeout(playing); playing = null; playB.textContent = "▶ 自動播放"; } };
+  },
+  leave() { this._stop && this._stop(); }
+};
+
+</script>
+<script>
+/* ───── 共用：小工具 ───── */
+const pill = (txt, color) => h("span", { style: `display:inline-block;padding:2px 10px;border-radius:999px;background:${color};color:#fff;font-weight:700;font-size:16px` }, txt);
+PAGES[6].answer = 'MY_AUGS = ["crop", "flip", "color"]   # 參考答案，每個人可以不同';
+PAGES[8].answer = "# TODO 3-1\nfor p in model.parameters():\n    p.requires_grad = False\n\n# TODO 3-2\nmodel = load_backbone(backbone, pretrained=False)";
+PAGES[9].answer = "model.fc = nn.Linear(model.fc.in_features, NUM_CLASSES)   # 也就是 nn.Linear(512, 3)";
+PAGES[10].answer = "optimizer.zero_grad()\nout = model(x)\nloss = loss_fn(out, y)\nloss.backward()\noptimizer.step()";
+PAGES[11].answer = "pred = logits.argmax(dim=1)\nreturn (pred == y).sum().item()";
+PAGES[14].answer = "# ① 每個回合開始時（correct = total = 0 的下一行）\nloss_sum = 0.0\n# ② 每一批訓練完之後（for 迴圈裡面）\nloss_sum += loss_value * y.numel()\n# ③ 回合結束時（hist[\"train\"].append(...) 附近）\nhist[\"loss\"].append(loss_sum / total)";
+PAGES[16].answer = "probs = torch.softmax(logits, dim=1)[0]\nbest = int(probs.argmax())";
+
+/* ───── 頁 6：TODO 2 資料擴增 ───── */
+BUILDERS[6] = { build(sec) {
+  const AUG = { crop: "隨機裁切一塊再放大", flip: "隨機左右翻轉", rotate: "隨機旋轉 ±20 度", color: "隨機調整亮度、對比", gray: "有 20% 機率變成灰階" };
+  const on = { crop: true, flip: true, color: false, rotate: false, gray: false };
+  const out = h("div", { class: "btns", style: "gap:6px" }), code = h("div");
+  function gen() {
+    out.innerHTML = "";
+    for (let i = 0; i < 8; i++) {
+      const o = { size: 96, bg: "#c9d6e3" };
+      if (on.crop) { o.scale = rand(1, 1.45); o.dx = rand(-12, 12); o.dy = rand(-12, 12); }
+      if (on.flip && Math.random() < .5) o.flip = true;
+      if (on.rotate) o.rot = rand(-20, 20);
+      let filt = "";
+      if (on.color) filt += `brightness(${rand(.7, 1.3).toFixed(2)}) contrast(${rand(.7, 1.3).toFixed(2)}) `;
+      if (on.gray && Math.random() < .2) filt += "grayscale(1)";
+      out.append(h("span", { style: `filter:${filt || "none"}`, html: handSVG("scissors", o) }));
+    }
+    const list = Object.keys(on).filter(k => on[k]);
+    code.replaceChildren(codeBlock(`MY_AUGS = [${list.map(k => `"${k}"`).join(", ")}]`));
+  }
+  const toggles = h("div", { class: "stack", style: "gap:6px" }, ...Object.entries(AUG).map(([k, d]) => {
+    const cb = h("input", { type: "checkbox", id: "aug-" + k }); cb.checked = on[k];
+    cb.onchange = () => { on[k] = cb.checked; gen(); };
+    return h("label", { for: "aug-" + k, style: "display:flex;gap:10px;align-items:center;cursor:pointer" }, cb, h("code", {}, `"${k}"`), h("span", { class: "small" }, d));
+  }));
+  // 配對遊戲
+  const Q = [["換成左手", "flip"], ["手比較靠近鏡頭，只拍到一部分", "crop"], ["教室燈比較暗", "color"], ["手稍微歪一邊", "rotate"], ["換了一個背景", "none"]];
+  const quiz = h("div", { class: "stack", style: "gap:8px" }, ...Q.map(([q, ans], qi) => {
+    const sel = h("select", { id: "aq" + qi }, h("option", { value: "" }, "選一個…"), ...Object.keys(AUG).map(k => h("option", { value: k }, k)), h("option", { value: "none" }, "都模擬不了"));
+    const res = h("span");
+    sel.onchange = () => { res.innerHTML = sel.value === ans ? "<span class='ok'>✅</span>" + (ans === "none" ? " 擴增有極限，只能靠多拍不同背景的照片。" : "") : "<span class='err'>再想想</span>"; };
+    return h("div", { class: "btns" }, h("label", { for: "aq" + qi, style: "min-width:15em" }, q), sel, res);
+  }));
+  sec.append(h("div", { class: "stack" },
+    h("p", {}, "訓練時對照片做隨機變化，同一張照片每一回合看起來都不太一樣，模型就比較不會「死背」。"),
+    h("div", { class: "row" }, h("div", { class: "card", style: "flex:0 1 380px" }, h("h3", {}, "選擇擴增方式"), toggles),
+      h("div", { class: "card grow stack" }, h("div", { class: "btns" }, h("h3", { style: "margin:0" }, "同一張原圖，抽 8 次"), h("button", { class: "btn primary", type: "button", onclick: gen }, "🎲 再抽一次")), out,
+        h("p", { class: "small" }, "你目前的選擇寫成 Python："), code,
+        h("p", { class: "small" }, "list 的寫法跟 C++ 的陣列初始化 {\"flip\", \"rotate\"} 很像：名稱要加引號、用逗號分隔。"))),
+    h("div", { class: "card stack" }, h("h3", {}, "配對：哪種擴增可以模擬這個挑戰情境？"), quiz),
+    h("div", { class: "row" }, h("div", { class: "note grow" }, h("b", {}, "擴增只用在訓練。"), "評估和測試時不做隨機變化，分數才公平、可以重現。"),
+      h("div", { class: "note teal grow" }, h("b", {}, "不是越多越好。"), "要符合現實可能出現的變化，例如手勢上下顛倒幾乎不會發生，加了反而可能干擾學習。"))));
+  gen();
+} };
+
+/* ───── 頁 7：三組資料 ───── */
+BUILDERS[7] = { build(sec) {
+  const N = 30, film = h("div", { style: "display:flex;gap:3px;flex-wrap:wrap" }), zoom = h("div", { class: "btns" });
+  const frames = Array.from({ length: N }, (_, i) => ({ dx: Math.sin(i / 3) * 5, dy: Math.cos(i / 4) * 4, rot: Math.sin(i / 5) * 7 }));
+  let val = new Set();
+  const els = frames.map((f, i) => {
+    const el = h("span", { style: "border:3px solid transparent;border-radius:4px;display:inline-block", html: handSVG("paper", { size: 56, ...f }) });
+    el.addEventListener("mouseenter", () => {
+      if (!val.has(i)) return;
+      els.forEach(e => (e.style.outline = ""));
+      [i - 1, i + 1].forEach(k => els[k] && (els[k].style.outline = "3px solid var(--accent)"));
+      zoom.replaceChildren(...[i - 1, i, i + 1].filter(k => k >= 0 && k < N).map(k => h("div", { style: "text-align:center" },
+        h("span", { html: handSVG("paper", { size: 120, ...frames[k] }) }), h("div", { class: "small" }, k === i ? "驗證照片" : "隔壁的訓練照片"))));
+    });
+    film.append(el); return el;
+  });
+  function split() {
+    val = new Set(); while (val.size < 6) val.add(Math.floor(Math.random() * N));
+    els.forEach((e, i) => (e.style.borderColor = val.has(i) ? "var(--accent)" : "var(--g2)"));
+    zoom.replaceChildren(h("p", { class: "small" }, "把滑鼠移到橘框的「驗證照片」上，看看它的左右鄰居。"));
+  }
+  const chal = h("div", { class: "btns", style: "gap:3px" }, ...Array.from({ length: 10 }, (_, i) =>
+    h("span", { style: "border:3px solid var(--teal);border-radius:4px", html: handSVG("paper", { size: 56, flip: i % 2 === 0, scale: i % 3 ? 1 : .6, bg: i % 4 ? "#c9d6e3" : "#f2d7a6", dark: i % 5 === 0 ? .4 : 0 }) })));
+  sec.append(h("div", { class: "stack" },
+    h("div", { class: "card stack" }, h("div", { class: "btns" }, h("h3", { style: "margin:0" }, "30 張連拍的訓練照片（布）"), h("button", { class: "btn primary", type: "button", onclick: split }, "🎲 隨機切分")),
+      film, h("p", { class: "small" }, "藍框 = 訓練集（約 24 張）　橘框 = 同場景驗證集（隨機抽 20%，約 6 張）"), zoom),
+    h("div", { class: "card stack" }, h("h3", {}, "另外拍的挑戰照片（10 張）"), chal, h("p", { class: "small" }, "綠框 = 換情境挑戰集。它們不是從上面的膠卷抽出來的。")),
+    h("div", { class: "row" },
+      h("div", { class: "card grow" }, h("h3", { style: "color:var(--g2)" }, "訓練集"), h("p", {}, "模型用來學習。")),
+      h("div", { class: "card grow" }, h("h3", { style: "color:var(--accent)" }, "同場景驗證集"), h("p", {}, "跟訓練照片出自同一批連拍。")),
+      h("div", { class: "card grow" }, h("h3", { style: "color:var(--teal)" }, "換情境挑戰集"), h("p", {}, "換了條件、模型沒看過。")))));
+  sec.append(think("如果模型在同場景驗證集考 100 分，在挑戰集只考 60 分，你相信哪一個分數？", h("p", {}, "訓練完看結果時揭曉（6-5～6-6）。")));
+  split();
+} };
+
+/* ───── 頁 8：TODO 3 凍結、微調、從零 ───── */
+BUILDERS[8] = { build(sec) {
+  const blocks = [["conv1", 9408, "線條"], ["layer1", 147968, "紋理"], ["layer2", 525568, "花紋"], ["layer3", 2099712, "部件"], ["layer4", 8393728, "形狀"], ["fc", 1539, "分類"]];
+  const MODES = {
+    freeze: { name: "凍結 freeze", start: "learned", train: [false, false, false, false, false, true], count: "1,539", meta: "請一位很會看圖的專家幫你看照片，你只學最後「怎麼判斷是剪刀、石頭還是布」。" },
+    finetune: { name: "微調 finetune", start: "learned", train: [true, true, true, true, true, true], count: "11,178,051", meta: "請專家來，但允許他依照你的手勢照片，稍微調整看圖的習慣。" },
+    scratch: { name: "從零 scratch", start: "random", train: [true, true, true, true, true, true], count: "11,178,051", meta: "找一個完全沒看過任何圖片的新手，從頭教起。" }
+  };
+  const diagram = h("div", { class: "btns", style: "gap:8px;align-items:flex-end" }), info = h("div", { class: "stack" });
+  function show(m) {
+    const M = MODES[m];
+    diagram.replaceChildren(...blocks.map(([n, cnt, feat], i) => h("div", { style: `display:flex;flex-direction:column;align-items:center;gap:4px` },
+      h("div", { style: `font-size:26px` }, M.train[i] ? "✔" : "🔒"),
+      h("div", { style: `width:${i === 5 ? 70 : 90 + i * 12}px;height:${70 + Math.min(i, 4) * 16}px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-direction:column;
+        background:${M.train[i] ? "var(--accent-soft)" : "var(--line)"};border:3px solid ${M.train[i] ? "var(--accent)" : "var(--muted)"}` },
+        h("b", { class: "mono" }, n), h("span", { class: "small" }, i === 5 ? "新的層" : M.start === "learned" ? "已學會：" + feat : "隨機 ⁘⁘")))));
+    info.replaceChildren(h("p", {}, h("b", {}, "要訓練的參數："), h("span", { class: "mono", style: "font-size:24px;color:var(--accent)" }, M.count), " 個"), h("p", { class: "note" }, M.meta));
+    $$("button", modeBtns).forEach(b => b.setAttribute("aria-pressed", b.dataset.m === m));
+  }
+  const modeBtns = h("div", { class: "btns" }, ...Object.entries(MODES).map(([k, M]) => h("button", { class: "btn", type: "button", "data-m": k, onclick: () => show(k) }, M.name)));
+  // requires_grad 旋鈕
+  const knobs = Array.from({ length: 8 }, (_, i) => ({ v: rand(0, 300), g: i >= 6 }));
+  const knobBox = h("div", { class: "btns", style: "gap:14px" });
+  const drawK = () => knobBox.replaceChildren(...knobs.map((k, i) => {
+    const cb = h("input", { type: "checkbox", id: "kn" + i }); cb.checked = k.g; cb.onchange = () => { k.g = cb.checked; drawK(); };
+    return h("div", { style: "display:flex;flex-direction:column;align-items:center;gap:4px" },
+      h("div", { style: `width:54px;height:54px;border-radius:50%;border:3px solid ${k.g ? "var(--accent)" : "var(--muted)"};position:relative;transform:rotate(${k.v}deg);transition:transform .5s` },
+        h("div", { style: "position:absolute;left:50%;top:4px;width:4px;height:20px;background:var(--ink);transform:translateX(-50%)" })),
+      h("span", {}, k.g ? "" : "🔒"), h("label", { for: "kn" + i, class: "small mono", style: "display:flex;gap:4px;align-items:center" }, cb, k.g ? "True" : "False"));
+  }));
+  drawK();
+  sec.append(h("div", { class: "stack" },
+    h("p", {}, "三種方式都用 ResNet18，只差在「從哪裡開始」和「訓練哪些層」。預訓練權重是別人用 ImageNet 120 萬張照片訓練好的參數。"),
+    modeBtns, h("div", { class: "card scroll-x" }, diagram), info,
+    h("div", { class: "card stack" }, h("h3", {}, "requires_grad：決定一個參數會不會被訓練"),
+      h("p", {}, "每個旋鈕代表一個參數。勾選＝requires_grad = True。按「訓練一次」，只有 True 的旋鈕會轉。"), knobBox,
+      h("div", { class: "btns" }, h("button", { class: "btn primary", type: "button", onclick: () => { knobs.forEach(k => k.g && (k.v += rand(-60, 60))); drawK(); } }, "▶ 訓練一次")),
+      h("div", { class: "row" }, h("div", { class: "grow" }, h("p", { class: "small" }, "Python"), codeBlock("for p in model.parameters():\n    p.requires_grad = False")),
+        h("div", { class: "grow" }, h("p", { class: "small" }, "C++ 的想法"), codeBlock("for (auto &p : params)\n    p.requires_grad = false;", "cpp"))),
+      h("p", {}, "意思就是「走過每一個參數，把它鎖住」。從零訓練則是不載入預訓練權重：", h("code", {}, "pretrained=False"), "。"))));
+  sec.append(think("你覺得哪一種方式最需要大量資料？", h("p", {}, "等一下用實驗來驗證！（6-7 計時賽、第 7 節我的實驗）")));
+  show("freeze");
+} };
+
+/* ───── 頁 9：TODO 4 換掉最後一層 ───── */
+BUILDERS[9] = { build(sec) {
+  const k = h("input", { type: "range", id: "nCls", min: 1, max: 1000, value: 3 });
+  const svgBox = h("div"), formula = h("p", { class: "mono", style: "font-size:24px" });
+  function draw() {
+    const n = +k.value, show = Math.min(n, 8);
+    let s = `<svg viewBox="0 0 520 300" style="width:100%;max-width:520px;height:auto" role="img" aria-label="512 個特徵連到 ${n} 個輸出">`;
+    const ins = 8, iy = i => 30 + i * 30, oy = j => 150 - (show - 1) * 15 + j * 30;
+    for (let i = 0; i < ins; i++) for (let j = 0; j < show; j++) s += `<line x1="90" y1="${iy(i)}" x2="420" y2="${oy(j)}" stroke="var(--line)" stroke-width="1"/>`;
+    for (let i = 0; i < ins; i++) s += `<circle cx="90" cy="${iy(i)}" r="9" fill="var(--teal)"/>`;
+    for (let j = 0; j < show; j++) s += `<circle cx="420" cy="${oy(j)}" r="11" fill="var(--accent)"/>`;
+    const labels = n === 3 ? ["布", "石頭", "剪刀"] : [];
+    labels.forEach((l, j) => (s += `<text x="440" y="${oy(j) + 6}" font-size="18" fill="var(--ink)">${l}</text>`));
+    s += `<text x="10" y="290" font-size="16" fill="var(--muted)">… 共 512 個特徵</text><text x="330" y="290" font-size="16" fill="var(--muted)">${n > 8 ? "… 共 " + n + " 個輸出" : n + " 個輸出"}</text></svg>`;
+    svgBox.innerHTML = s;
+    formula.innerHTML = `512 × ${n} + ${n} = <b style="color:var(--accent)">${(512 * n + n).toLocaleString()}</b> 個參數`;
+  }
+  k.oninput = draw;
+  const kc = h("input", { type: "number", id: "ck", value: 7, min: 1, style: "width:4em" }), ci = h("input", { type: "number", id: "ci", value: 3, min: 1, style: "width:4em" }), co = h("input", { type: "number", id: "co", value: 64, min: 1, style: "width:5em" });
+  const cr = h("p", { class: "mono", style: "font-size:22px" });
+  const cc = () => (cr.innerHTML = `${kc.value} × ${kc.value} × ${ci.value} × ${co.value} = <b style="color:var(--accent)">${(kc.value * kc.value * ci.value * co.value).toLocaleString()}</b>`);
+  [kc, ci, co].forEach(x => (x.oninput = cc));
+  sec.append(h("div", { class: "stack" },
+    h("p", {}, "ResNet18 前面的層會把一張照片濃縮成 ", h("b", {}, "512 個特徵數字"), "。原本的最後一層要分 ImageNet 的 1000 類，我們只需要分 3 類。"),
+    h("div", { class: "row" }, h("div", { class: "card grow" }, svgBox),
+      h("div", { class: "card grow stack" }, h("label", { for: "nCls" }, "輸出類別數："), k,
+        h("div", { class: "btns" }, ...[3, 10, 1000].map(v => h("button", { class: "btn", type: "button", onclick: () => { k.value = v; draw(); } }, v + " 類"))), formula,
+        h("p", {}, "每一類的分數 = 512 個特徵 × 各自的權重，全部加總 ＋ 1 個偏值（bias）。"),
+        h("p", {}, "C++：", h("code", {}, "float W[3][512]; float b[3];"), " → 3×512 + 3 = 1,539 個數字。"))),
+    h("div", { class: "note" }, h("b", {}, "換頭的規則："), "輸入一樣是 512 個，要跟前面的層接得上，所以用 ", h("code", {}, "model.fc.in_features"), " 取得；輸出改成 3 個（", h("code", {}, "NUM_CLASSES"), "）。新換上去的層是隨機數字，一定要經過訓練。"),
+    h("div", { class: "card stack" }, h("h3", {}, "加碼：卷積層的參數怎麼算（5-3）"),
+      h("div", { class: "btns" }, h("label", { for: "ck" }, "卷積核大小 k"), kc, h("label", { for: "ci" }, "輸入通道"), ci, h("label", { for: "co" }, "輸出通道"), co), cr,
+      h("p", { class: "small" }, "預設值就是 ResNet18 的第一層 conv1：7 × 7 × 3 × 64 = 9,408。"))));
+  draw(); cc();
+} };
+
+/* ───── 頁 10：TODO 5 訓練五步驟 ───── */
+BUILDERS[10] = { build(sec) {
+  const STEPS = [["① optimizer.zero_grad()", "擦掉上一份考卷的訂正筆記（清空梯度）"], ["② out = model(x)", "寫考卷：照片丟進模型，得到分數（前向傳播）"], ["③ loss = loss_fn(out, y)", "對答案：算出錯得多離譜（loss）"], ["④ loss.backward()", "檢討：算出參數該往哪邊調（梯度）"], ["⑤ optimizer.step()", "訂正：把參數調一小步"]];
+  const cv = h("canvas", { width: 560, height: 300, style: "width:100%;max-width:560px;background:var(--sheet);border-radius:8px;border:1px solid var(--line)" });
+  const lossCv = h("canvas", { width: 300, height: 160, style: "width:100%;max-width:300px;border:1px solid var(--line);border-radius:8px;background:var(--sheet)" });
+  let w = -3.2, sub = -1, hist = [], frozen = false;
+  const lr = h("input", { type: "range", id: "lr", min: .02, max: 1.05, step: .01, value: .15 });
+  const L = x => (x - 1) * (x - 1) + .3, G = x => 2 * (x - 1);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function draw() {
+    const c = cv.getContext("2d"), W = 560, H = 300, X = x => 40 + (x + 4) / 9 * (W - 60), Y = y => H - 30 - y / 26 * (H - 50);
+    c.clearRect(0, 0, W, H); c.strokeStyle = css("--muted"); c.lineWidth = 2; c.beginPath();
+    for (let x = -4; x <= 5; x += .05) { const px = X(x), py = Y(L(x)); x === -4 ? c.moveTo(px, py) : c.lineTo(px, py); } c.stroke();
+    c.fillStyle = css("--muted"); c.font = "15px sans-serif"; c.fillText("參數 w →", W - 80, H - 8); c.fillText("loss ↑", 6, 18);
+    c.fillStyle = frozen ? css("--muted") : css("--accent"); c.beginPath(); c.arc(X(w), Y(L(w)), 11, 0, 7); c.fill();
+    if (sub === 3 && !frozen) { const dir = -Math.sign(G(w)); c.strokeStyle = css("--teal"); c.lineWidth = 4; c.beginPath(); c.moveTo(X(w), Y(L(w)) - 22); c.lineTo(X(w) + dir * 60, Y(L(w)) - 22); c.stroke();
+      c.fillStyle = css("--teal"); c.fillText(dir > 0 ? "往右走 loss 會變小" : "往左走 loss 會變小", X(w) - 60, Y(L(w)) - 32); }
+    const lc = lossCv.getContext("2d"); lc.clearRect(0, 0, 300, 160); lc.strokeStyle = css("--accent"); lc.lineWidth = 2; lc.beginPath();
+    hist.forEach((v, i) => { const x = 10 + i * 280 / Math.max(10, hist.length), y = 150 - Math.min(v, 22) / 22 * 140; i ? lc.lineTo(x, y) : lc.moveTo(x, y); }); lc.stroke();
+    lc.fillStyle = css("--muted"); lc.font = "13px sans-serif"; lc.fillText("loss 隨回合的變化", 10, 14);
+    stepList.forEach((el, i) => (el.style.background = i === sub ? "var(--accent-soft)" : "transparent"));
+    msg.textContent = sub < 0 ? "按「下一步」逐步執行五個步驟。" : STEPS[sub][1] + (frozen && sub >= 3 ? "　→ 但參數被凍結（requires_grad = False），不會被改到！" : "");
+  }
+  function next() {
+    sub = (sub + 1) % 5;
+    if (sub === 2) hist.push(L(w));
+    if (sub === 4 && !frozen) w -= +lr.value * G(w);
+    draw();
+  }
+  const stepList = STEPS.map(([c]) => h("div", { class: "mono", style: "padding:4px 8px;border-radius:6px;font-size:18px" }, c));
+  const msg = h("p", { class: "note", "aria-live": "polite" });
+  const frz = h("input", { type: "checkbox", id: "frz" }); frz.onchange = () => { frozen = frz.checked; draw(); };
+  let auto = null;
+  const autoB = h("button", { class: "btn", type: "button", onclick: () => { if (auto) { clearInterval(auto); auto = null; autoB.textContent = "▶ 自動訓練"; return; } autoB.textContent = "⏸ 暫停"; auto = Timers.interval(next, 160); } }, "▶ 自動訓練");
+  // 排序拼圖
+  const LINES = ["loss.backward()", "optimizer.step()", "out = model(x)", "optimizer.zero_grad()", "loss = loss_fn(out, y)"];
+  const CORRECT = ["optimizer.zero_grad()", "out = model(x)", "loss = loss_fn(out, y)", "loss.backward()", "optimizer.step()"];
+  const sels = CORRECT.map((_, i) => h("select", { id: "ord" + i, style: "font-family:var(--font-mono)" }, h("option", { value: "" }, "選一行…"), ...LINES.map(l => h("option", { value: l }, l))));
+  const ordRes = h("p", { "aria-live": "polite" });
+  function checkOrder() {
+    const v = sels.map(s => s.value);
+    if (v.join() === CORRECT.join()) { ordRes.innerHTML = "<span class='ok'>✅ 順序正確！</span>"; return; }
+    const pos = l => v.indexOf(l);
+    let why = "還不對。";
+    if (pos("loss.backward()") > -1 && pos("loss = loss_fn(out, y)") > pos("loss.backward()")) why = "還沒算出 loss（③）就想反向傳播（④），程式不知道要往哪裡調。";
+    else if (pos("optimizer.step()") > -1 && pos("optimizer.step()") < pos("loss.backward()")) why = "還沒反向傳播（④）就 step（⑤），參數不知道要往哪邊改。";
+    else if (pos("optimizer.zero_grad()") > 0) why = "zero_grad 要放在最前面，不然會把剛算好的梯度清掉，或混到上一批的梯度。";
+    else if (pos("out = model(x)") > pos("loss = loss_fn(out, y)")) why = "要先有 out（②），才能拿 out 去算 loss（③）。";
+    ordRes.innerHTML = `<span class='err'>${why}</span>`;
+  }
+  sec.append(h("div", { class: "stack" },
+    h("p", {}, "在 Teachable Machine 按下「Train」後，每一批照片都會重複五個步驟，就像訂正考卷。下面用「只有一個參數 w 的模型」示範："),
+    h("div", { class: "row" }, h("div", { class: "grow stack" }, cv,
+      h("div", { class: "btns" }, h("button", { class: "btn primary", type: "button", onclick: next }, "下一步 ▶"), autoB,
+        h("button", { class: "btn", type: "button", onclick: () => { w = -3.2; sub = -1; hist = []; draw(); } }, "↺ 重來")),
+      h("div", { class: "btns" }, h("label", { for: "lr" }, "學習率（每一步走多遠）"), lr),
+      h("label", { for: "frz", style: "display:flex;gap:8px;align-items:center" }, frz, "把 w 凍結（requires_grad = False）"),
+      h("p", { class: "small" }, "試試看：學習率拉到最大，球會在谷底兩側跳來跳去，甚至越跳越遠。")),
+      h("div", { class: "stack", style: "flex:0 1 340px" }, h("div", { class: "card stack", style: "gap:2px" }, ...stepList), msg, lossCv)),
+    h("div", { class: "card stack" }, h("h3", {}, "排序拼圖：把五行排成正確順序"), ...sels.map((s, i) => h("div", { class: "btns" }, h("label", { for: "ord" + i, class: "mono" }, `第 ${i + 1} 行`), s)),
+      h("div", { class: "btns" }, h("button", { class: "btn primary", type: "button", onclick: checkOrder }, "檢查")), ordRes),
+    h("div", { class: "note teal" }, h("b", {}, "名詞："), "所有訓練照片都輪過一次＝一個「回合（epoch）」；一次一起計算的照片張數＝一「批」（batch）。")));
+  draw();
+  this._stop = () => { if (auto) { clearInterval(auto); auto = null; autoB.textContent = "▶ 自動訓練"; } };
+}, leave() { this._stop && this._stop(); } };
+
+/* ───── 頁 11：TODO 6 計算猜對幾張 ───── */
+BUILDERS[11] = { build(sec) {
+  const NAMES = ["布", "石頭", "剪刀"], KIND = ["paper", "rock", "scissors"];
+  const data = [[0.1, 2.0, 0.3, 1], [3.0, 0.0, 0.0, 0], [0.0, 0.2, 0.1, 2], [0.5, 0.4, 2.2, 2], [1.4, 1.9, 0.2, 0]];
+  let stage = 0;
+  const tbl = h("div", { class: "scroll-x" }), sum = h("p", { style: "font-size:22px" });
+  function render() {
+    const rows = data.map((r, ri) => {
+      const sc = r.slice(0, 3), y = r[3], pred = sc.indexOf(Math.max(...sc)), ok = pred === y;
+      return h("tr", {}, h("td", { html: handSVG(KIND[y], { size: 46 }) }),
+        ...sc.map((v, ci) => { const inp = h("input", { type: "number", step: .1, value: v, id: `lg${ri}${ci}`, style: `width:4.5em;font-family:var(--font-mono);padding:4px;${stage >= 1 && ci === pred ? "outline:3px solid var(--accent);font-weight:700" : ""}` });
+          inp.onchange = () => { data[ri][ci] = +inp.value; render(); }; return h("td", {}, inp); }),
+        h("td", { class: "mono" }, stage >= 1 ? `${pred}（${NAMES[pred]}）` : ""), h("td", { class: "mono" }, `${y}（${NAMES[y]}）`),
+        h("td", { style: "font-size:22px" }, stage >= 2 ? (ok ? "✔ True" : "✘ False") : ""));
+    });
+    tbl.replaceChildren(h("table", { style: "border-collapse:separate;border-spacing:8px 4px" },
+      h("thead", {}, h("tr", {}, ...["答案的手勢", "布 0", "石頭 1", "剪刀 2", "預測 pred", "正確答案 y", "pred == y"].map(t => h("th", { class: "small", style: "text-align:left" }, t)))), h("tbody", {}, ...rows)));
+    const c = data.filter(r => r.slice(0, 3).indexOf(Math.max(...r.slice(0, 3))) === r[3]).length;
+    sum.innerHTML = stage >= 2 ? `True 當作 1、False 當作 0，加總：猜對 <b style="color:var(--accent)">${c}</b> 張 / 共 5 張 = 準確率 <b>${c * 20}%</b>` : "";
+  }
+  sec.append(h("div", { class: "stack" },
+    h("p", {}, "模型一次看一批照片，每張照片得到三個分數（logits）。分數可以直接修改："),
+    h("div", { class: "card stack" }, tbl, sum,
+      h("div", { class: "btns" }, h("button", { class: "btn primary", type: "button", onclick: () => { stage = 1; render(); } }, "① 找出每列最大值（argmax）"),
+        h("button", { class: "btn primary", type: "button", onclick: () => { stage = 2; render(); } }, "② 比對答案並加總"), h("button", { class: "btn", type: "button", onclick: () => { stage = 0; render(); } }, "↺"))),
+    h("div", { class: "note" }, h("b", {}, "argmax 回傳的是「最大值的位置」，不是最大值本身。"), "dim=1 的意思是沿著每一列「橫向」找。"),
+    h("div", { class: "row" }, h("div", { class: "grow" }, h("p", { class: "small" }, "Python 兩行"), codeBlock("pred = logits.argmax(dim=1)\nreturn (pred == y).sum().item()")),
+      h("div", { class: "grow" }, h("p", { class: "small" }, "等效的 C++"), codeBlock("int correct = 0;\nfor (int i = 0; i < n; i++) {\n    int pred = 0;\n    for (int c = 1; c < 3; c++)\n        if (logits[i][c] > logits[i][pred]) pred = c;\n    if (pred == y[i]) correct++;\n}", "cpp"))),
+    h("p", { class: "small" }, "挑戰：改分數，讓準確率剛好變成 100% 或 0%。")));
+  sec.append(think("如果三個分數都差不多，例如 1.0、1.1、0.9，模型猜的答案可信嗎？", h("p", {}, "下一個 TODO（softmax 與信心度）會回答這個問題。")));
+  render();
+} };
+
+/* ───── 頁 12：看懂訓練結果 ───── */
+BUILDERS[12] = { build(sec) {
+  const TYPES = {
+    good: { name: "學得好", t: [.5, .8, .92, .96, .97, .98, .98, .98], v: [.55, .82, .9, .95, .96, .97, .97, .97], c: [.5, .75, .85, .9, .92, .92, .93, .93], say: "三條線都上升，而且彼此接近：模型真的學會了。" },
+    over: { name: "過擬合", t: [.5, .8, .95, .99, 1, 1, 1, 1], v: [.5, .85, .97, 1, 1, 1, 1, 1], c: [.4, .45, .5, .52, .5, .55, .5, .52], say: "訓練和同場景驗證都接近 100%，挑戰集卻很低：模型只記住了訓練照片。" },
+    bad: { name: "還沒學會", t: [.35, .38, .4, .42, .43, .45, .46, .47], v: [.33, .35, .38, .4, .41, .42, .44, .45], c: [.33, .34, .36, .37, .38, .38, .39, .4], say: "三條線都偏低：資料太少、回合太少，或學習率不合適。" }
+  };
+  const show = { t: true, v: true, c: true }, box = h("div"), say = h("p", { class: "note" });
+  let cur = "over";
+  function draw() {
+    const T = TYPES[cur], W = 560, H = 300, X = i => 50 + i * (W - 80) / 7, Y = v => H - 40 - v * (H - 70);
+    let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" role="img" aria-label="學習曲線示意">`;
+    [0, .25, .5, .75, 1].forEach(v => (s += `<line x1="50" x2="${W - 30}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="10" y="${Y(v) + 5}" font-size="14" fill="var(--muted)">${v * 100}%</text>`));
+    for (let i = 0; i < 8; i++) s += `<text x="${X(i) - 4}" y="${H - 15}" font-size="14" fill="var(--muted)">${i + 1}</text>`;
+    s += `<text x="${W - 120}" y="${H - 1}" font-size="14" fill="var(--muted)">回合 epoch</text>`;
+    [["t", "var(--g2)", "train"], ["v", "var(--accent)", "val (same scene)"], ["c", "var(--teal)", "challenge (new scene)"]].forEach(([k, col, lab], li) => {
+      if (!show[k]) return;
+      s += `<polyline fill="none" stroke="${col}" stroke-width="4" points="${T[k].map((v, i) => X(i) + "," + Y(v)).join(" ")}"/>`;
+      s += `<text x="${W - 200}" y="${Y(T[k][7]) - 8 - li * 2}" font-size="15" fill="${col}">${lab}</text>`;
+    });
+    box.innerHTML = s + "</svg>"; say.textContent = T.say;
+  }
+  const typeBtns = h("div", { class: "btns" }, ...Object.entries(TYPES).map(([k, T]) => h("button", { class: "btn", type: "button", onclick: () => { cur = k; draw(); } }, T.name)));
+  const lineToggles = h("div", { class: "btns" }, ...[["t", "train"], ["v", "val"], ["c", "challenge"]].map(([k, l]) => { const cb = h("input", { type: "checkbox", id: "ln" + k }); cb.checked = true; cb.onchange = () => { show[k] = cb.checked; draw(); }; return h("label", { for: "ln" + k, style: "display:flex;gap:6px;align-items:center" }, cb, l); }));
+  // 混淆矩陣
+  const M = [[9, 1, 0], [0, 10, 0], [1, 4, 5]], N = ["布", "石頭", "剪刀"];
+  const cmMsg = h("p", { class: "note teal" }, "點任一格看說明。");
+  const cm = h("table", { style: "border-collapse:separate;border-spacing:4px" }, h("thead", {}, h("tr", {}, h("th"), ...N.map(n => h("th", { class: "small" }, "猜：" + n)))),
+    h("tbody", {}, ...M.map((r, i) => h("tr", {}, h("th", { class: "small" }, "答案：" + N[i]), ...r.map((v, j) => h("td", {},
+      h("button", { type: "button", class: "btn", style: `width:70px;height:56px;font-size:22px;background:${i === j ? "var(--teal-soft)" : v ? "var(--bad-soft)" : "var(--sheet)"}`,
+        onclick: () => (cmMsg.textContent = i === j ? `答案是${N[i]}，模型也猜${N[j]}：猜對 ${v} 張。` : `答案是${N[i]}，模型卻猜成${N[j]}：猜錯 ${v} 張。`) }, v)))))));
+  sec.append(h("div", { class: "stack" },
+    h("p", { class: "small" }, "⚠️ 這一頁的數字都是示意，實際以你的 Colab 結果為準。"),
+    h("div", { class: "card stack" }, h("h3", {}, "6-6 學習曲線：三種型態"), typeBtns, lineToggles, box, say),
+    h("details", { class: "reveal" }, h("summary", {}, "🔓 揭曉：為什麼同場景驗證的分數不能信？"),
+      h("div", { class: "inner" }, h("p", {}, "連拍的照片前後幾乎一模一樣。從同一批隨機抽出來考試，就像", h("b", {}, "考古題原題重考"), "，分數一定好看。"),
+        h("p", {}, "這叫做", h("b", {}, "資料洩漏（data leakage）"), "，是研究中最常見、也最致命的錯誤之一。要看「換情境挑戰」那一欄，才知道模型真正的程度。"))),
+    h("div", { class: "card stack" }, h("h3", {}, "混淆矩陣：模型最常把什麼看錯成什麼？"), h("div", { class: "scroll-x" }, cm), cmMsg,
+      h("p", { class: "small" }, "對角線（綠色）是猜對的，其他格（紅色）是猜錯的。這個示意例子裡，最常被搞混的是「剪刀被猜成石頭」。"))));
+  draw();
+} };
+
+/* ───── 頁 13：計時賽 ───── */
+BUILDERS[13] = { build(sec) {
+  const bets = ["第一回合誰最快？", "第二回合誰會被淘汰？"].map((q, qi) => {
+    const res = h("span", { class: "small" });
+    return h("div", { class: "btns" }, h("b", { style: "min-width:11em" }, q), ...["凍結", "微調", "從零"].map(n => h("button", { class: "btn", type: "button", onclick: e => { $$("button", e.target.parentNode).forEach(b => b.setAttribute("aria-pressed", b === e.target)); res.textContent = "已下注，等 Colab 跑完再揭曉"; } }, n)), res);
+  });
+  const RUN = [["凍結", "var(--g2)", 3, 50], ["微調", "var(--accent)", 1, 50], ["從零", "var(--teal)", 1, 0]];
+  const mkTrack = () => RUN.map(([n, col]) => { const dot = h("div", { style: `position:absolute;top:6px;left:0;width:40px;height:40px;border-radius:50%;background:${col};color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;transition:left .1s linear` }, n);
+    return { dot, el: h("div", { style: "position:relative;height:52px;border-bottom:2px dashed var(--line)" }, dot) }; });
+  const t1 = mkTrack(), t2 = mkTrack();
+  const goal = h("div", { style: "position:absolute;top:0;bottom:0;left:78%;border-left:4px solid var(--ink)" }, h("span", { class: "small", style: "position:absolute;top:-24px;left:-20px;white-space:nowrap" }, "目標線"));
+  const box2 = h("div", { style: "position:relative;margin-top:28px" }, goal, ...t2.map(t => t.el));
+  const msg1 = h("p", { class: "small" }), msg2 = h("p", { class: "small" });
+  function race1() {
+    Timers.clear(); const pos = [0, 0, 0];
+    Timers.interval(() => { RUN.forEach((r, i) => { pos[i] = Math.min(92, pos[i] + (i === 0 ? 1.5 : .5)); t1[i].dot.style.left = pos[i] + "%"; });
+      msg1.textContent = pos[0] >= 92 ? "凍結先到！微調和從零速度差不多。凍結的反向傳播只走到 fc 就停，前面的層不用計算。" : ""; }, 50);
+  }
+  function race2() {
+    Timers.clear(); const pos = [45, 45, 0]; let t = 0;
+    Timers.interval(() => { t++; RUN.forEach((r, i) => { pos[i] = Math.min(i === 0 ? 92 : 92, pos[i] + (i === 0 ? 1.2 : .45)); t2[i].dot.style.left = pos[i] + "%"; });
+      if (t > 140) { t2[2].dot.textContent = "⏰"; msg2.textContent = "時間到！從零的起點在最後面（隨機數字，什麼都沒學過），跑得一樣快也追不上。凍結和微調從「看過 128 萬張照片」的中段出發。"; } }, 50);
+  }
+  const inputs = RUN.map(([n], i) => h("input", { type: "number", id: "rs" + i, placeholder: "秒", style: "width:6em" }));
+  const bars = h("div", { class: "stack", style: "gap:6px" });
+  const drawBars = () => { const v = inputs.map(x => +x.value || 0), m = Math.max(1, ...v); bars.replaceChildren(...RUN.map(([n, col], i) => h("div", { class: "btns" }, h("span", { style: "width:3em" }, n), h("div", { style: `height:26px;width:${v[i] / m * 70}%;background:${col};border-radius:4px` }), h("span", { class: "mono" }, v[i] ? v[i] + " 秒" : "")))); };
+  inputs.forEach(x => (x.oninput = drawBars));
+  sec.append(h("div", { class: "stack" },
+    h("div", { class: "card stack" }, h("h3", {}, "賽前下注"), ...bets),
+    h("div", { class: "card stack" }, h("div", { class: "btns" }, h("h3", { style: "margin:0" }, "第一回合：搬磚賽（同樣張數，比誰先跑完）"), h("button", { class: "btn primary", type: "button", onclick: race1 }, "▶ 開跑")), h("div", {}, ...t1.map(t => t.el)), msg1),
+    h("div", { class: "card stack" }, h("div", { class: "btns" }, h("h3", { style: "margin:0" }, "第二回合：追趕賽（誰先碰到目標線）"), h("button", { class: "btn primary", type: "button", onclick: race2 }, "▶ 開跑")), box2, msg2),
+    h("div", { class: "card stack" }, h("h3", {}, "填入我們班的第一回合秒數"), h("div", { class: "btns" }, ...RUN.map(([n], i) => h("label", { for: "rs" + i, style: "display:flex;gap:6px;align-items:center" }, n, inputs[i]))), bars,
+      h("p", { class: "small" }, "跟動畫的預期不同？這正是值得討論的地方，可能跟挑戰照片的難度、有沒有分到 GPU 有關。")),
+    h("div", { class: "note teal" }, h("b", {}, "站在巨人的肩膀上："), "凍結和微調用的預訓練權重，是別人用 ImageNet 128 萬張照片、花大量運算時間訓練出來的。")));
+  sec.append(think("如果你的小論文要從零訓練，需要準備多少資料和時間？", h("p", {}, "通常要每類上千張以上的資料和大量 GPU 時間；資料少時，借用預訓練權重幾乎一定比較好。")));
+  drawBars();
+} };
+
+/* ───── 頁 14：延伸挑戰 C loss 曲線 ───── */
+BUILDERS[14] = { build(sec) {
+  const p = h("input", { type: "range", id: "pc", min: 1, max: 99, value: 40 });
+  const out = h("div"), cv = h("canvas", { width: 460, height: 220, style: "width:100%;max-width:460px;border:1px solid var(--line);border-radius:8px;background:var(--sheet)" });
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function draw() {
+    const q = p.value / 100, loss = -Math.log(q), c = cv.getContext("2d"), X = v => 30 + v * 410, Y = l => 200 - Math.min(l, 4.6) / 4.6 * 180;
+    c.clearRect(0, 0, 460, 220); c.strokeStyle = css("--muted"); c.lineWidth = 2; c.beginPath();
+    for (let v = .01; v <= 1; v += .01) { v < .02 ? c.moveTo(X(v), Y(-Math.log(v))) : c.lineTo(X(v), Y(-Math.log(v))); } c.stroke();
+    c.fillStyle = css("--accent"); c.beginPath(); c.arc(X(q), Y(loss), 8, 0, 7); c.fill();
+    c.fillStyle = css("--muted"); c.font = "14px sans-serif"; c.fillText("正確答案的機率 →", 320, 215); c.fillText("loss", 4, 16);
+    out.innerHTML = `<p style="font-size:22px">loss = −log(${q.toFixed(2)}) = <b style="color:var(--accent)">${loss.toFixed(2)}</b></p>
+      <p>${q >= .34 ? "如果這是三類中機率最高的，就算「猜對」" : "機率這麼低，多半「猜錯」"}。同樣是猜對，40% 和 95% 的 loss 差很多：loss 看的是「有多有把握」。</p>`;
+  }
+  p.oninput = draw;
+  const b1 = h("input", { type: "number", id: "b1", value: .5, step: .1, style: "width:5em" }), n1 = h("input", { type: "number", id: "n1", value: 16, style: "width:4em" });
+  const b2 = h("input", { type: "number", id: "b2", value: 1.0, step: .1, style: "width:5em" }), n2 = h("input", { type: "number", id: "n2", value: 8, style: "width:4em" });
+  const avg = h("p", { class: "mono", style: "font-size:19px" });
+  const ca = () => { const s = +b1.value * +n1.value + +b2.value * +n2.value, n = +n1.value + +n2.value; avg.innerHTML = `錯誤：(${b1.value} + ${b2.value}) ÷ 2 = ${((+b1.value + +b2.value) / 2).toFixed(3)}<br>正確：(${b1.value}×${n1.value} + ${b2.value}×${n2.value}) ÷ ${n} = <b style="color:var(--accent)">${(s / n).toFixed(3)}</b>`; };
+  [b1, n1, b2, n2].forEach(x => (x.oninput = ca));
+  const SLOTS = { 1: "① 每個回合開始時，把 loss 總和歸零。放錯在內層迴圈的話，每一批都會被清掉。", 2: "② 每一批訓練完之後，加進總和。loss_value 是這一批的「平均」，要乘以張數 y.numel()。", 3: "③ 回合結束時（內層迴圈外面），存入「總和 ÷ 總張數」。" };
+  const slotMsg = h("p", { class: "note teal" }, "點程式裡的 ★ 看說明。");
+  const skel = h("pre", { class: "code" });
+  skel.innerHTML = highlight(`for ep in range(1, EPOCHS + 1):\n    correct = total = 0\n    ★1\n    for x, y in 訓練資料:\n        out, loss_value = train_step(...)\n        correct += count_correct(out, y)\n        total += y.numel()\n        ★2\n    ★3\n    hist["train"].append(correct / total)`).replace(/★(\d)/g, (m, d) => `<button type="button" class="btn" data-s="${d}" style="padding:0 10px;color:var(--accent);border-color:var(--accent)">★${d}</button>`);
+  skel.addEventListener("click", e => { const d = e.target.dataset && e.target.dataset.s; if (d) slotMsg.textContent = SLOTS[d]; });
+  sec.append(h("div", { class: "stack" },
+    h("div", { class: "card stack" }, h("h3", {}, "loss 和準確率有什麼不同？"), h("p", {}, "準確率只看「對或錯」；loss 看「錯得多離譜、對得多有把握」。調整模型給正確答案的機率："),
+      h("div", { class: "btns" }, h("label", { for: "pc" }, "正確答案的機率"), p), h("div", { class: "row" }, cv, h("div", { class: "grow" }, out))),
+    h("div", { class: "card stack" }, h("h3", {}, "為什麼要乘以張數？"),
+      h("div", { class: "btns" }, h("label", { for: "b1" }, "第一批平均 loss"), b1, h("label", { for: "n1" }, "張數"), n1, h("label", { for: "b2" }, "第二批平均 loss"), b2, h("label", { for: "n2" }, "張數"), n2), avg),
+    h("div", { class: "card stack" }, h("h3", {}, "要在 train_one 的哪三個位置加程式？"), skel, slotMsg)));
+  sec.append(think("loss 一直下降，代表挑戰集的準確率也會越來越高嗎？", h("p", {}, "不一定。loss 是用訓練照片算的，可能只是越來越會「背」訓練照片（過擬合），所以還是要看挑戰集。")));
+  draw(); ca();
+} };
+
+/* ───── 頁 15：我的實驗 ───── */
+BUILDERS[15] = { build(sec) {
+  const V = [["TRAIN_LIMIT", "每類用幾張訓練", "None（全部，約 24 張）", ["3", "5", "10"], "資料少到幾張時，哪一種方式最先撐不住？"],
+    ["AUGS", "資料擴增", "自己在 TODO 2 選的", ["[]"], "擴增對挑戰集有幫助嗎？"],
+    ["EPOCHS", "訓練回合數", "8", ["2", "20"], "從零訓練多跑幾回合，能不能追上？"],
+    ["LR_SCALE", "學習率倍數", "1", ["0.1", "10"], "學習率放大 10 倍，微調會怎樣？"],
+    ["IMG_SIZE", "影像尺寸", "160", ["64", "224"], "影像變小，速度和準確率怎麼取捨？"],
+    ["BACKBONE", "預訓練模型", '"resnet18"', ['"mobilenet_v3_small"'], "換一個預訓練模型，結果一樣嗎？"]];
+  const chosen = new Set(), val = {};
+  const code = h("div"), warn = h("p", { class: "note", hidden: "" }, h("b", {}, "⚠️ 一次只能改一個變因！"), "同時改兩個，就不知道結果的差異是誰造成的。");
+  const draw = () => {
+    warn.hidden = chosen.size <= 1;
+    const k = [...chosen][0];
+    code.replaceChildren(codeBlock(chosen.size === 1 ? `MY_CHANGE = {"${k}": ${val[k] || V.find(v => v[0] === k)[3][0]}}` : chosen.size === 0 ? "MY_CHANGE = ____   # 先選一張卡片" : "# 一次只能改一個變因！"));
+  };
+  const cards = V.map(([k, zh, base, sug, q]) => {
+    const cb = h("input", { type: "checkbox", id: "vc" + k });
+    const sel = h("select", { id: "vs" + k }, ...sug.map(s => h("option", { value: s }, s)));
+    sel.onchange = () => { val[k] = sel.value; draw(); };
+    cb.onchange = () => { cb.checked ? chosen.add(k) : chosen.delete(k); card.style.borderColor = cb.checked ? "var(--accent)" : "var(--line)"; draw(); };
+    const card = h("div", { class: "card stack", style: "gap:6px;flex:1 1 280px" }, h("label", { for: "vc" + k, style: "display:flex;gap:8px;align-items:center;cursor:pointer" }, cb, h("b", { class: "mono" }, k), h("span", {}, zh)),
+      h("p", { class: "small" }, "基準值：" + base), h("div", { class: "btns" }, h("label", { for: "vs" + k, class: "small" }, "改成"), sel), h("p", {}, "🤔 " + q));
+    return card;
+  });
+  const pred = h("textarea", { id: "pred", rows: 2, style: "width:100%;font:inherit;padding:8px", placeholder: "我預測……（這裡不會儲存，請寫在學習單 A4）" });
+  sec.append(h("div", { class: "stack" },
+    h("div", { class: "note teal" }, h("b", {}, "控制變因："), "想知道肥料對植物的影響，就只改肥料，陽光、水量都要一樣。同時改兩樣，就不知道是誰造成的差異。這也是小論文實驗設計的基本方法。"),
+    h("div", { class: "row" }, ...cards), warn,
+    h("p", {}, "你的設定寫成 Python 的字典（dict），類似 C++ 的 ", h("code", {}, "map<string, int>"), "：冒號左邊是名稱，右邊是值。字串要加引號，None 和數字不用。"), code,
+    h("div", { class: "card stack" }, h("label", { for: "pred" }, h("b", {}, "先預測，再執行！")), pred, h("p", { class: "small" }, "結果跟預測不一樣，正是最值得討論的地方。"))));
+  draw();
+} };
+
+/* ───── 頁 16：TODO 7 softmax ───── */
+BUILDERS[16] = { build(sec) {
+  const N = ["布", "石頭", "剪刀"], sl = N.map((n, i) => h("input", { type: "range", id: "sm" + i, min: -5, max: 5, step: .1, value: [0, 2, 1][i] }));
+  const raw = h("div", { class: "stack", style: "gap:6px" }), prob = h("div", { class: "stack", style: "gap:6px" }), calc = h("div", { hidden: "" });
+  function draw() {
+    const z = sl.map(s => +s.value), e = z.map(Math.exp), S = e.reduce((a, b) => a + b, 0), P = e.map(v => v / S), best = P.indexOf(Math.max(...P));
+    raw.replaceChildren(...z.map((v, i) => h("div", { class: "btns" }, h("span", { style: "width:3em" }, N[i]), h("div", { style: "position:relative;flex:1;height:24px;background:var(--code-bg);border-radius:4px" },
+      h("div", { style: `position:absolute;top:0;bottom:0;left:${v < 0 ? 50 + v * 10 : 50}%;width:${Math.abs(v) * 10}%;background:var(--muted);border-radius:4px` }),
+      h("div", { style: "position:absolute;top:0;bottom:0;left:50%;border-left:2px solid var(--ink)" })), h("span", { class: "mono", style: "width:3.5em" }, v.toFixed(1)))));
+    prob.replaceChildren(...P.map((v, i) => h("div", { class: "btns" }, h("span", { style: "width:3em" }, N[i]), h("div", { style: "flex:1;height:30px;background:var(--code-bg);border-radius:6px;overflow:hidden" },
+      h("div", { style: `height:100%;width:${v * 100}%;background:${i === best ? "var(--accent)" : "var(--teal)"};transition:width .2s` })), h("span", { class: "mono", style: "width:4em" }, (v * 100).toFixed(0) + "%"), i === best ? pill("預測", "var(--accent)") : null)));
+    calc.innerHTML = `<p class="mono">① e 的次方：${z.map((v, i) => `e^${v.toFixed(1)} = ${e[i].toFixed(2)}`).join("　")}</p>
+      <p class="mono">② 加總：${e.map(v => v.toFixed(2)).join(" + ")} = ${S.toFixed(2)}</p>
+      <p class="mono">③ 各自除以總和：${e.map((v, i) => `${N[i]} ${v.toFixed(2)} ÷ ${S.toFixed(2)} = ${(P[i] * 100).toFixed(0)}%`).join("　")}</p>
+      <p class="small">取 e 的次方，負數也會變成正數，而且分數越大放大越多。</p>`;
+  }
+  sl.forEach(s => (s.oninput = draw));
+  const preset = (v, t) => h("button", { class: "btn", type: "button", onclick: () => { sl.forEach((s, i) => (s.value = v[i])); draw(); } }, t);
+  sec.append(h("div", { class: "stack" },
+    h("p", {}, "模型輸出三個分數（logits，可以是負數）。softmax 會把它們轉成加總 100% 的機率，就是 Teachable Machine 顯示的信心度。"),
+    h("div", { class: "row" }, h("div", { class: "card grow stack" }, h("h3", {}, "調整三個分數"), ...sl.map((s, i) => h("div", { class: "btns" }, h("label", { for: "sm" + i, style: "width:3em" }, N[i]), s)), h("p", { class: "small" }, "原始分數"), raw),
+      h("div", { class: "card grow stack" }, h("h3", {}, "softmax 之後的機率"), prob,
+        h("div", { class: "btns" }, preset([1, 1, 1], "分數都一樣"), preset([1.0, 1.2, 0.9], "差一點點"), preset([0, 6, 1], "差很多"),
+          h("button", { class: "btn", type: "button", onclick: () => { sl.forEach(s => (s.value = Math.min(5, +s.value + 3))); draw(); } }, "三個都 +3")))),
+    h("div", { class: "card stack" }, h("button", { class: "btn", type: "button", style: "align-self:flex-start", onclick: () => (calc.hidden = !calc.hidden) }, "展開／收起計算過程"), calc),
+    h("div", { class: "row" }, h("div", { class: "note grow" }, h("b", {}, "觀察："), "分數都一樣 → 各 33%，模型完全不確定；差一點點 → 猜對也可能只是運氣；差很多 → 接近 100%，很有把握。三個都加同一個數，機率不變：softmax 看的是分數之間的差距。"),
+      h("div", { class: "grow stack" }, h("p", { class: "small" }, "程式怎麼寫"), codeBlock("probs = torch.softmax(logits, dim=1)[0]   # (1, 3) → 取第一張的三個機率\nbest = int(probs.argmax())                # 最大值的位置，轉成整數")))));
+  draw();
+} };
+
+/* ───── 頁 17：回到你的題目 ───── */
+BUILDERS[17] = { build(sec) {
+  const EX = [["辨識校園樹葉種類", "分類", "一張照片一片葉子，回答「是哪一種」。"], ["計算教室裡有幾個人", "偵測", "要找出每個人「在哪裡」才能數，需要畫框標註。"], ["判斷水果熟了沒", "分類", "一張照片一顆水果，回答「熟／沒熟」。"], ["找出照片中所有的垃圾並分類", "偵測", "一張照片有很多東西，要框出每一個的位置。"]];
+  const quiz = h("div", { class: "stack", style: "gap:8px" }, ...EX.map(([q, a, why]) => { const r = h("span");
+    return h("div", { class: "btns" }, h("b", { style: "min-width:14em" }, q), ...["分類", "偵測"].map(t => h("button", { class: "btn", type: "button", onclick: () => (r.innerHTML = (t === a ? "<span class='ok'>✅ </span>" : "<span class='err'>✘ 比較像" + a + "：</span>") + why) }, t)), r); }));
+  const QS = ["影像在你的題目中，要用來辨識什麼？", "資料從哪裡來？大約能取得多少張？", "你的照片跟一般生活照片像不像？（顯微鏡、X 光、熱影像跟一般照片差很多）", "測試資料要怎麼取得，才不會跟訓練資料「同一批」？", "如果不適合，有沒有其他更適合的資料處理方式？"];
+  let qi = 0; const qBox = h("p", { style: "font-size:24px;font-weight:700;min-height:2.6em" }), qNum = h("span", { class: "mono small" });
+  const showQ = () => { qBox.textContent = QS[qi]; qNum.textContent = `${qi + 1} / ${QS.length}`; };
+  sec.append(h("div", { class: "stack" },
+    h("div", { class: "row" },
+      h("div", { class: "card grow stack" }, h("h3", {}, "分類（classification）"), h("div", { html: handSVG("scissors", { size: 120 }) }), h("p", {}, "整張圖給一個答案：「這張是剪刀」。今天做的就是分類。")),
+      h("div", { class: "card grow stack" }, h("h3", {}, "偵測（detection）"),
+        h("div", { html: `<svg viewBox="0 0 200 120" width="220" role="img" aria-label="偵測示意"><rect width="200" height="120" fill="#c9d6e3"/><circle cx="50" cy="60" r="20" fill="#2b8a3e"/><circle cx="140" cy="45" r="16" fill="#2b8a3e"/><circle cx="120" cy="90" r="14" fill="#2b8a3e"/>
+          <rect x="26" y="36" width="48" height="48" fill="none" stroke="#d9480f" stroke-width="3"/><rect x="120" y="25" width="40" height="40" fill="none" stroke="#d9480f" stroke-width="3"/><rect x="102" y="72" width="36" height="36" fill="none" stroke="#d9480f" stroke-width="3"/></svg>` }),
+        h("p", {}, "找出圖中東西「在哪裡」並畫框：「有 3 片葉子，位置在這裡」。需要逐張畫框標註，工作量大很多。"))),
+    h("div", { class: "card stack" }, h("h3", {}, "猜猜看：比較像分類還是偵測？"), quiz),
+    h("div", { class: "card stack" }, h("div", { class: "btns" }, h("h3", { style: "margin:0" }, "我的題目思考卡"), qNum), qBox,
+      h("div", { class: "btns" }, h("button", { class: "btn", type: "button", onclick: () => { qi = Math.max(0, qi - 1); showQ(); } }, "◀ 上一題"), h("button", { class: "btn primary", type: "button", onclick: () => { qi = Math.min(QS.length - 1, qi + 1); showQ(); } }, "下一題 ▶")),
+      h("p", { class: "small" }, "答案請寫在學習單 Part B，這個網頁不會儲存任何內容。")),
+    h("div", { class: "row" }, h("div", { class: "note grow" }, h("b", {}, "「不適合」也是好結論。"), "只要理由充分，跟「適合」一樣好。不要為了顯得厲害，硬把影像辨識塞進題目。"),
+      h("div", { class: "note teal grow" }, h("b", {}, "notebook 可以帶回家："), "題目用得到影像辨識的話，把拍照換成讀取自己的照片資料夾（每一類一個子資料夾，例如 my_data/train/類別A），就能用自己的資料跑一樣的比較。"))));
+  showQ();
+} };
+
+</script>
+<script>
+buildAll();
+const start = parseInt((location.hash.match(/^#p(\d+)$/) || [])[1] || "0", 10);
+go(isNaN(start) ? 0 : start);
+</script>
 </body>
 </html>
